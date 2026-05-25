@@ -1,0 +1,929 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "customer", "guardian", "job", "billing", "audit", "analytics", "system", "public"]
+}
+
+// --- identity ---
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+  DELETED
+
+  @@schema("identity")
+}
+
+enum OnboardingStep {
+  PHONE_VERIFIED
+  PROFILE_COMPLETE
+  DOCUMENTS_UPLOADED
+  PAYMENT_COMPLETE
+  SUBMITTED
+
+  @@schema("identity")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+
+  @@schema("identity")
+}
+
+enum RoleCode {
+  SUPER_ADMIN
+  OPS_ADMIN
+  CLIENT_OWNER
+  CLIENT_STAFF
+  GUARDIAN
+
+  @@schema("identity")
+}
+
+model Role {
+  id   Int      @id @default(autoincrement()) @db.SmallInt
+  code RoleCode @unique
+
+  userRoles       UserRoleAssignment[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+  @@schema("identity")
+}
+
+/// Platform-scoped permission catalog (resource:action codes).
+model Permission {
+  id          Int     @id @default(autoincrement()) @db.SmallInt
+  code        String  @unique @db.VarChar(80)
+  resource    String  @db.VarChar(40)
+  action      String  @db.VarChar(40)
+  description String? @db.VarChar(200)
+
+  rolePermissions         RolePermission[]
+  orgMemberRolePermissions OrgMemberRolePermission[]
+
+  @@map("permissions")
+  @@schema("identity")
+}
+
+/// Maps platform Role (SUPER_ADMIN, OPS_ADMIN, GUARDIAN) to permissions.
+model RolePermission {
+  roleId       Int @map("role_id") @db.SmallInt
+  permissionId Int @map("permission_id") @db.SmallInt
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+  @@schema("identity")
+}
+
+/// Maps OrgMemberRole (CLIENT_OWNER, CLIENT_STAFF) to permissions.
+/// Always organization-scoped; effective when activeOrgId is set and user is a member.
+model OrgMemberRolePermission {
+  orgMemberRole OrgMemberRole @map("org_member_role")
+  permissionId  Int           @map("permission_id") @db.SmallInt
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([orgMemberRole, permissionId])
+  @@map("org_member_role_permissions")
+  @@schema("identity")
+}
+
+model User {
+  id                     String     @id @default(uuid()) @db.Uuid
+  phoneNumber            String     @unique @map("phone_number") @db.VarChar(20)
+  email                  String?    @unique @db.VarChar(254)
+  fullName               String?    @map("full_name") @db.VarChar(200)
+  dateOfBirth            DateTime?  @map("date_of_birth") @db.Date
+  gender                 Gender?
+  profilePhotoDocumentId String?    @map("profile_photo_document_id") @db.Uuid
+  passwordHash           String?    @map("password_hash")
+  passwordSetAt          DateTime?  @map("password_set_at")
+  status                 UserStatus @default(ACTIVE)
+  isPhoneVerified        Boolean    @default(false) @map("is_phone_verified")
+  isEmailVerified        Boolean    @default(false) @map("is_email_verified")
+  lastLoginAt            DateTime?       @map("last_login_at")
+  onboardingStep         OnboardingStep? @map("onboarding_step")
+  onboardingCompletedAt  DateTime?       @map("onboarding_completed_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  profilePhoto           DocumentStorage? @relation("UserProfilePhoto", fields: [profilePhotoDocumentId], references: [id])
+  userRoles              UserRoleAssignment[]
+  refreshTokens          RefreshToken[]
+  organizationUsers      OrganizationUser[]
+  assignedRoles          UserRoleAssignment[] @relation("AssignedBy")
+  organizationInvites    OrganizationUser[]   @relation("InvitedBy")
+  jobsCreated            Job[]
+  incidentsReported      FieldIncident[]
+  documentsUploaded      DocumentStorage[]    @relation("DocumentsUploaded")
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  guardianProfile        Guardian?
+  guardiansActivated     Guardian[]           @relation("GuardianActivatedBy")
+  vettingRecordsCreated  GuardianVettingRecord[] @relation("VettingBy")
+
+  @@map("users")
+  @@schema("identity")
+}
+
+model UserRoleAssignment {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     Int      @map("role_id") @db.SmallInt
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  assignedBy String?  @map("assigned_by") @db.Uuid
+
+  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     Role  @relation(fields: [roleId], references: [id])
+  assigner User? @relation("AssignedBy", fields: [assignedBy], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+  @@schema("identity")
+}
+
+model OtpSession {
+  id                String    @id @default(uuid()) @db.Uuid
+  phoneNumber       String    @map("phone_number") @db.VarChar(20)
+  otpHash           String    @map("otp_hash")
+  expiresAt         DateTime  @map("expires_at")
+  attempts          Int       @default(0) @db.SmallInt
+  verifiedAt        DateTime? @map("verified_at")
+  ipAddress         String?   @map("ip_address")
+  deviceFingerprint String?   @map("device_fingerprint")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([phoneNumber, createdAt(sort: Desc)])
+  @@map("otp_sessions")
+  @@schema("identity")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  jti       String    @unique
+  familyId  String    @map("family_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+  @@map("refresh_tokens")
+  @@schema("identity")
+}
+
+// --- customer ---
+
+enum OrgType {
+  BAR
+  HOTEL
+  EVENT_COMPANY
+  NGO
+  SCHOOL
+  RESTAURANT
+  INDIVIDUAL
+  COMPOUND
+  LOGISTICS
+  OTHER
+
+  @@schema("customer")
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@schema("customer")
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+
+  @@schema("customer")
+}
+
+enum OrgMemberRole {
+  CLIENT_OWNER
+  CLIENT_STAFF
+
+  @@schema("customer")
+}
+
+enum MobileMoneyProvider {
+  MOMO_MTN
+  AIRTEL_MONEY
+
+  @@schema("customer")
+}
+
+enum OrgVerificationDocumentType {
+  TIN_CERTIFICATE
+  BUSINESS_REGISTRATION
+  NATIONAL_ID
+  OTHER
+
+  @@schema("customer")
+}
+
+enum CoordinatePrecision {
+  DISTRICT_APPROX
+  USER_PINNED
+
+  @@schema("customer")
+}
+
+model Organization {
+  id                   String              @id @default(uuid()) @db.Uuid
+  legalName            String              @map("legal_name") @db.VarChar(200)
+  tradingName          String?             @map("trading_name") @db.VarChar(200)
+  tinNumber            String?             @unique @map("tin_number") @db.VarChar(20)
+  orgType              OrgType             @map("org_type")
+  mobileMoneyProvider  MobileMoneyProvider @map("mobile_money_provider")
+  mobileMoneyPhone     String              @map("mobile_money_phone") @db.VarChar(20)
+  verificationStatus          VerificationStatus  @default(PENDING) @map("verification_status")
+  verificationRejectionReason String?             @map("verification_rejection_reason") @db.VarChar(500)
+  applicationSubmittedAt      DateTime?           @map("application_submitted_at")
+  status                      OrgStatus           @default(ACTIVE)
+  createdAt                   DateTime            @default(now()) @map("created_at")
+  updatedAt                   DateTime            @updatedAt @map("updated_at")
+
+  users                   OrganizationUser[]
+  locations               Location[]
+  jobs                    Job[]
+  invoices                Invoice[]
+  pricingRules            PricingRule[]
+  verificationDocuments OrganizationVerificationDocument[]
+
+  @@map("organizations")
+  @@schema("customer")
+}
+
+model OrganizationVerificationDocument {
+  id             String                      @id @default(uuid()) @db.Uuid
+  organizationId String                      @map("organization_id") @db.Uuid
+  documentId     String                      @map("document_id") @db.Uuid
+  documentType   OrgVerificationDocumentType @map("document_type")
+  createdAt      DateTime                    @default(now()) @map("created_at")
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  document     DocumentStorage @relation(fields: [documentId], references: [id])
+
+  @@unique([organizationId, documentId])
+  @@map("organization_verification_documents")
+  @@schema("customer")
+}
+
+model OrganizationUser {
+  organizationId String        @map("organization_id") @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  role           OrgMemberRole
+  invitedBy      String?       @map("invited_by") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inviter      User?        @relation("InvitedBy", fields: [invitedBy], references: [id])
+
+  @@id([organizationId, userId])
+  @@map("organization_users")
+  @@schema("customer")
+}
+
+model Location {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  district       String   @db.VarChar(100)
+  sector         String?  @db.VarChar(100)
+  cell           String?  @db.VarChar(100)
+  village        String?  @db.VarChar(100)
+  address        String?
+  latitude              Decimal             @db.Decimal(10, 7)
+  longitude             Decimal             @db.Decimal(10, 7)
+  coordinatePrecision   CoordinatePrecision @default(DISTRICT_APPROX) @map("coordinate_precision")
+  isPrimary             Boolean             @default(false) @map("is_primary")
+  siteSetupCompletedAt  DateTime?           @map("site_setup_completed_at")
+  operatingHours        Json?               @map("operating_hours")
+  status                String              @default("ACTIVE") @db.VarChar(20)
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  jobs         Job[]
+
+  @@index([organizationId])
+  @@map("locations")
+  @@schema("customer")
+}
+
+// --- guardian ---
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  RESERVE
+
+  @@schema("guardian")
+}
+
+enum GuardianStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+
+  @@schema("guardian")
+}
+
+enum ShiftStatus {
+  AVAILABLE
+  BUSY
+  PAUSED
+  OFF_DUTY
+  SUSPENDED
+
+  @@schema("guardian")
+}
+
+enum CertificationType {
+  FIRST_AID
+  CROWD_CONTROL
+  FIREARM
+  RESERVE_FORCE
+  RNP_SECURITY_LICENSE
+
+  @@schema("guardian")
+}
+
+enum GuardianVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+
+  @@schema("guardian")
+}
+
+enum CertificationVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+
+  @@schema("guardian")
+}
+
+enum PreferredShift {
+  DAY
+  NIGHT
+  BOTH
+
+  @@schema("guardian")
+}
+
+enum GuardianSpecialization {
+  PATROL
+  ESCORT
+  EVENT_SECURITY
+  DOOR_SUPERVISION
+  VIP_PROTECTION
+  EMERGENCY_RESPONSE
+  COMPOUND_SECURITY
+  STATIC_POST
+
+  @@schema("guardian")
+}
+
+model Guardian {
+  id                   String                     @id @default(uuid()) @db.Uuid
+  userId               String                     @unique @map("user_id") @db.Uuid
+  guardianCode         String                     @unique @map("guardian_code") @db.VarChar(20)
+  nationalIdHash       String                     @map("national_id_hash")
+  verificationStatus   GuardianVerificationStatus @default(PENDING) @map("verification_status")
+  employmentType       EmploymentType             @default(PART_TIME) @map("employment_type")
+  status               GuardianStatus             @default(INACTIVE)
+  rating               Decimal                    @default(0) @db.Decimal(3, 2)
+  reliabilityScore     Decimal                    @default(100) @map("reliability_score") @db.Decimal(5, 2)
+  avgResponseMinutes   Decimal?                   @map("avg_response_minutes") @db.Decimal(6, 2)
+  districtBase         String                     @map("district_base") @db.VarChar(100)
+  sectorBase           String?                    @map("sector_base") @db.VarChar(100)
+  coverageDistricts    String[]                   @default([]) @map("coverage_districts")
+  yearsExperience      Int?                       @map("years_experience") @db.SmallInt
+  previousEmployers    Json?                      @map("previous_employers")
+  specializations      GuardianSpecialization[]   @default([])
+  preferredShift       PreferredShift?            @map("preferred_shift")
+  reserveForceNumberHash String?                  @map("reserve_force_number_hash")
+  activatedAt          DateTime?                  @map("activated_at")
+  activatedBy          String?                    @map("activated_by") @db.Uuid
+  joinedAt             DateTime                   @default(now()) @map("joined_at")
+  updatedAt            DateTime                   @updatedAt @map("updated_at")
+
+  user             User                    @relation(fields: [userId], references: [id])
+  activator        User?                   @relation("GuardianActivatedBy", fields: [activatedBy], references: [id])
+  shiftState       GuardianShiftState?
+  assignments      JobAssignment[]
+  certifications   Certification[]
+  locationHistory  LocationHistory[]
+  performanceDaily GuardianPerformanceDaily[]
+  vettingRecord    GuardianVettingRecord?
+
+  @@map("guardians")
+  @@schema("guardian")
+}
+
+model GuardianVettingRecord {
+  id                  String   @id @default(uuid()) @db.Uuid
+  guardianId          String   @unique @map("guardian_id") @db.Uuid
+  vettedAt            DateTime @map("vetted_at")
+  vettedByUserId      String   @map("vetted_by_user_id") @db.Uuid
+  rnpReferenceNumber  String?  @map("rnp_reference_number") @db.VarChar(100)
+  clearanceDocumentId String?  @map("clearance_document_id") @db.Uuid
+  reserveForceVerified Boolean @default(false) @map("reserve_force_verified")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  guardian          Guardian         @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  vettedBy          User             @relation("VettingBy", fields: [vettedByUserId], references: [id])
+  clearanceDocument DocumentStorage? @relation(fields: [clearanceDocumentId], references: [id])
+
+  @@map("guardian_vetting_records")
+  @@schema("guardian")
+}
+
+model GuardianShiftState {
+  guardianId         String      @id @map("guardian_id") @db.Uuid
+  shiftStatus        ShiftStatus @default(OFF_DUTY) @map("shift_status")
+  availableForJobs   Boolean     @default(false) @map("available_for_jobs")
+  shiftStartedAt     DateTime?   @map("shift_started_at")
+  shiftEndsAt        DateTime?   @map("shift_ends_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@map("guardian_shift_state")
+  @@schema("guardian")
+}
+
+model Certification {
+  id                 String                          @id @default(uuid()) @db.Uuid
+  guardianId         String                          @map("guardian_id") @db.Uuid
+  certificationType  CertificationType               @map("certification_type")
+  issuer             String                          @db.VarChar(200)
+  issueDate          DateTime                        @map("issue_date") @db.Date
+  expiryDate         DateTime?                       @map("expiry_date") @db.Date
+  documentId         String?                         @map("document_id") @db.Uuid
+  verificationStatus CertificationVerificationStatus @default(PENDING) @map("verification_status")
+  createdAt          DateTime                        @default(now()) @map("created_at")
+
+  guardian Guardian         @relation(fields: [guardianId], references: [id])
+  document DocumentStorage? @relation(fields: [documentId], references: [id])
+
+  @@map("certifications")
+  @@schema("guardian")
+}
+
+model LocationHistory {
+  id           String   @id @default(uuid()) @db.Uuid
+  guardianId   String   @map("guardian_id") @db.Uuid
+  latitude     Decimal  @db.Decimal(10, 7)
+  longitude    Decimal  @db.Decimal(10, 7)
+  speed        Decimal? @db.Decimal(6, 2)
+  batteryLevel Int?     @map("battery_level") @db.SmallInt
+  recordedAt   DateTime @map("recorded_at")
+
+  guardian Guardian @relation(fields: [guardianId], references: [id])
+
+  @@index([guardianId, recordedAt(sort: Desc)])
+  @@map("location_history")
+  @@schema("guardian")
+}
+
+// --- job ---
+
+enum JobType {
+  PATROL
+  ESCORT
+  EVENT_SECURITY
+  DOOR_SUPERVISION
+  VIP_PROTECTION
+  EMERGENCY_RESPONSE
+  COMPOUND_SECURITY
+  STATIC_POST
+
+  @@schema("job")
+}
+
+enum JobPriority {
+  STANDARD
+  HIGH
+  URGENT
+
+  @@schema("job")
+}
+
+enum JobStatus {
+  PENDING
+  DISPATCHING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@schema("job")
+}
+
+enum AssignmentStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  EN_ROUTE
+  ON_SITE
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+
+  @@schema("job")
+}
+
+enum IncidentType {
+  FIGHT
+  TRESPASSING
+  THEFT_ATTEMPT
+  PROPERTY_DAMAGE
+  CUSTOMER_DISPUTE
+  MEDICAL_ASSIST
+  SUSPICIOUS_ACTIVITY
+  OTHER
+
+  @@schema("job")
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@schema("job")
+}
+
+model Job {
+  id                     String      @id @default(uuid()) @db.Uuid
+  referenceNumber        String      @unique @map("reference_number") @db.VarChar(20)
+  organizationId         String      @map("organization_id") @db.Uuid
+  locationId             String      @map("location_id") @db.Uuid
+  createdBy              String      @map("created_by") @db.Uuid
+  jobType                JobType     @map("job_type")
+  priority               JobPriority @default(STANDARD)
+  status                 JobStatus   @default(PENDING)
+  requestedGuardianCount Int         @default(1) @map("requested_guardian_count") @db.SmallInt
+  scheduledStart         DateTime    @map("scheduled_start")
+  scheduledEnd           DateTime    @map("scheduled_end")
+  notes                  String?
+  specialInstructions    String?     @map("special_instructions")
+  dispatchAttempts       Int         @default(0) @map("dispatch_attempts")
+  maxDispatchAttempts    Int         @default(3) @map("max_dispatch_attempts")
+  createdAt              DateTime    @default(now()) @map("created_at")
+  updatedAt              DateTime    @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  location     Location          @relation(fields: [locationId], references: [id])
+  creator      User              @relation(fields: [createdBy], references: [id])
+  assignments  JobAssignment[]
+  statusHistory JobStatusHistory[]
+  invoice      Invoice?
+
+  @@index([status, createdAt])
+  @@index([organizationId, status])
+  @@map("jobs")
+  @@schema("job")
+}
+
+model JobAssignment {
+  id              String           @id @default(uuid()) @db.Uuid
+  jobId           String           @map("job_id") @db.Uuid
+  guardianId      String           @map("guardian_id") @db.Uuid
+  assignmentRound Int              @default(1) @map("assignment_round") @db.SmallInt
+  status          AssignmentStatus @default(OFFERED)
+  versionNumber   Int              @default(1) @map("version_number")
+  offerSentAt     DateTime         @default(now()) @map("offer_sent_at")
+  expiresAt       DateTime           @map("expires_at")
+  acceptedAt      DateTime?        @map("accepted_at")
+  arrivedAt       DateTime?        @map("arrived_at")
+  completedAt     DateTime?        @map("completed_at")
+  noShowReason    String?          @map("no_show_reason")
+
+  job       Job            @relation(fields: [jobId], references: [id])
+  guardian  Guardian       @relation(fields: [guardianId], references: [id])
+  incidents FieldIncident[]
+
+  @@unique([jobId, guardianId, assignmentRound])
+  @@index([jobId, status])
+  @@index([guardianId, status])
+  @@index([status, expiresAt])
+  @@map("job_assignments")
+  @@schema("job")
+}
+
+model JobStatusHistory {
+  id         String     @id @default(uuid()) @db.Uuid
+  jobId      String     @map("job_id") @db.Uuid
+  oldStatus  JobStatus? @map("old_status")
+  newStatus  JobStatus  @map("new_status")
+  changedBy  String?    @map("changed_by") @db.Uuid
+  reason     String?
+  changedAt  DateTime   @default(now()) @map("changed_at")
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@index([jobId, changedAt(sort: Desc)])
+  @@map("job_status_history")
+  @@schema("job")
+}
+
+model FieldIncident {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @map("assignment_id") @db.Uuid
+  incidentType IncidentType     @map("incident_type")
+  severity     IncidentSeverity @default(LOW)
+  description  String
+  mediaIds     String[]         @map("media_ids") @db.Uuid
+  createdBy    String           @map("created_by") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  assignment JobAssignment @relation(fields: [assignmentId], references: [id])
+  reporter   User          @relation(fields: [createdBy], references: [id])
+
+  @@map("field_incidents")
+  @@schema("job")
+}
+
+// --- billing ---
+
+enum PricingModel {
+  HOURLY
+  FLAT
+  TIERED
+
+  @@schema("billing")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  PARTIALLY_PAID
+  OVERDUE
+  VOID
+
+  @@schema("billing")
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+
+  @@schema("billing")
+}
+
+enum PaymentProvider {
+  MOMO_MTN
+  AIRTEL_MONEY
+  BANK_TRANSFER
+  CASH
+
+  @@schema("billing")
+}
+
+model PricingRule {
+  id                String       @id @default(uuid()) @db.Uuid
+  priority          Int          @db.SmallInt
+  organizationId    String?      @map("organization_id") @db.Uuid
+  district          String?      @db.VarChar(100)
+  jobType           JobType?     @map("job_type")
+  validFrom         DateTime     @default(now()) @map("valid_from") @db.Date
+  validUntil        DateTime?    @map("valid_until") @db.Date
+  pricingModel      PricingModel @map("pricing_model")
+  hourlyRate        Decimal?     @map("hourly_rate") @db.Decimal(10, 2)
+  flatFee           Decimal?     @map("flat_fee") @db.Decimal(10, 2)
+  weekendMultiplier Decimal      @default(1) @map("weekend_multiplier") @db.Decimal(4, 2)
+  nightMultiplier   Decimal      @default(1) @map("night_multiplier") @db.Decimal(4, 2)
+  currency          String       @default("RWF") @db.Char(3)
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([priority(sort: Desc)])
+  @@map("pricing_rules")
+  @@schema("billing")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  jobId          String        @unique @map("job_id") @db.Uuid
+  subtotal       Decimal       @db.Decimal(12, 2)
+  taxAmount      Decimal       @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  total          Decimal       @db.Decimal(12, 2)
+  currency       String        @default("RWF") @db.Char(3)
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?     @map("issued_at")
+  dueAt          DateTime?     @map("due_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  job          Job          @relation(fields: [jobId], references: [id])
+  payments     Payment[]
+  ebmReceipt   EbmReceipt?
+
+  @@index([organizationId, status])
+  @@map("invoices")
+  @@schema("billing")
+}
+
+model Payment {
+  id              String          @id @default(uuid()) @db.Uuid
+  invoiceId       String          @map("invoice_id") @db.Uuid
+  provider        PaymentProvider
+  externalTxnId   String?         @map("external_txn_id") @db.VarChar(200)
+  amount          Decimal         @db.Decimal(12, 2)
+  currency        String          @default("RWF") @db.Char(3)
+  status          PaymentStatus   @default(PENDING)
+  idempotencyKey  String          @unique @map("idempotency_key") @db.VarChar(100)
+  paidAt          DateTime?       @map("paid_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("payments")
+  @@schema("billing")
+}
+
+model EbmReceipt {
+  id            String   @id @default(uuid()) @db.Uuid
+  invoiceId     String   @unique @map("invoice_id") @db.Uuid
+  receiptNumber String   @unique @map("receipt_number") @db.VarChar(100)
+  qrPayload     String   @map("qr_payload")
+  rawResponse   String   @map("raw_response")
+  issuedAt      DateTime @default(now()) @map("issued_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("ebm_receipts")
+  @@schema("billing")
+}
+
+// --- audit ---
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  action      String   @db.VarChar(80)
+  entityType  String   @map("entity_type") @db.VarChar(60)
+  entityId    String   @map("entity_id") @db.Uuid
+  beforeState Json?    @map("before_state")
+  afterState  Json?    @map("after_state")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+  @@schema("audit")
+}
+
+// --- analytics ---
+
+model JobFactsDaily {
+  id                  String   @id @default(uuid()) @db.Uuid
+  date                DateTime @db.Date
+  district            String   @db.VarChar(100)
+  jobType             JobType  @map("job_type")
+  hourOfDay           Int?     @map("hour_of_day") @db.SmallInt
+  jobCount            Int      @default(0) @map("job_count")
+  completedCount      Int      @default(0) @map("completed_count")
+  cancelledCount      Int      @default(0) @map("cancelled_count")
+  avgResponseMinutes  Decimal? @map("avg_response_minutes") @db.Decimal(8, 2)
+  totalRevenue        Decimal  @default(0) @map("total_revenue") @db.Decimal(14, 2)
+  computedAt          DateTime @default(now()) @map("computed_at")
+
+  @@unique([date, district, jobType, hourOfDay])
+  @@map("job_facts_daily")
+  @@schema("analytics")
+}
+
+model GuardianPerformanceDaily {
+  id                 String   @id @default(uuid()) @db.Uuid
+  date               DateTime @db.Date
+  guardianId         String   @map("guardian_id") @db.Uuid
+  jobsAssigned       Int      @default(0) @map("jobs_assigned") @db.SmallInt
+  jobsCompleted      Int      @default(0) @map("jobs_completed") @db.SmallInt
+  noShowCount        Int      @default(0) @map("no_show_count") @db.SmallInt
+  completionRate     Decimal  @default(0) @map("completion_rate") @db.Decimal(5, 2)
+  avgResponseMinutes Decimal? @map("avg_response_minutes") @db.Decimal(8, 2)
+  avgRating          Decimal? @map("avg_rating") @db.Decimal(3, 2)
+  computedAt         DateTime @default(now()) @map("computed_at")
+
+  guardian Guardian @relation(fields: [guardianId], references: [id])
+
+  @@unique([date, guardianId])
+  @@map("guardian_performance_daily")
+  @@schema("analytics")
+}
+
+// --- system ---
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+
+  @@schema("system")
+}
+
+enum NotificationChannel {
+  PUSH
+  IN_APP
+  SMS
+  EMAIL
+
+  @@schema("system")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  aggregateType String       @map("aggregate_type") @db.VarChar(60)
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  eventType     String       @map("event_type") @db.VarChar(80)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retries       Int          @default(0) @db.SmallInt
+  lastError     String?      @map("last_error")
+  scheduledAt   DateTime     @default(now()) @map("scheduled_at")
+  processedAt   DateTime?    @map("processed_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  @@index([status, scheduledAt])
+  @@map("outbox_events")
+  @@schema("system")
+}
+
+model DocumentStorage {
+  id         String   @id @default(uuid()) @db.Uuid
+  storageKey String   @unique @map("storage_key") @db.VarChar(500)
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  sizeBytes  BigInt   @map("size_bytes")
+  encrypted  Boolean  @default(true)
+  uploadedBy String?  @map("uploaded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  uploader                      User?                            @relation("DocumentsUploaded", fields: [uploadedBy], references: [id])
+  profilePhotos                 User[]                           @relation("UserProfilePhoto")
+  certifications                Certification[]
+  vettingClearances             GuardianVettingRecord[]
+  organizationVerificationDocs OrganizationVerificationDocument[]
+
+  @@map("document_storage")
+  @@schema("system")
+}
+
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  channel   NotificationChannel
+  title     String
+  body      String
+  payload   Json?
+  readAt    DateTime?           @map("read_at")
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+  @@schema("system")
+}

@@ -1,0 +1,258 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  CertificationVerificationStatus,
+  GuardianVerificationStatus,
+  InvoiceStatus,
+  JobType,
+  PricingModel,
+  VerificationStatus,
+} from '@prisma/client';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { BillingService } from '../billing/billing.service';
+import { AdminAnalyticsService } from './admin-analytics.service';
+import { AdminAuditService } from './admin-audit.service';
+import { AdminPricingService } from './admin-pricing.service';
+import { AdminGuardiansService } from './admin-guardians.service';
+import { AdminVerificationService } from './admin-verification.service';
+import { AdminCreateCertificationDto } from './dto/admin-create-certification.dto';
+import { CreateGuardianDto } from './dto/create-guardian.dto';
+import { CreateVettingDto } from './dto/create-vetting.dto';
+import { ListGuardiansQueryDto } from './dto/list-guardians-query.dto';
+import { ReviewVerificationDto } from './dto/review-verification.dto';
+import { UpdateGuardianDto } from './dto/update-guardian.dto';
+import { PrismaService } from '../prisma/prisma.service';
+
+@ApiTags('admin')
+@ApiBearerAuth()
+@Controller('admin')
+export class AdminController {
+  constructor(
+    private readonly guardians: AdminGuardiansService,
+    private readonly verification: AdminVerificationService,
+    private readonly pricing: AdminPricingService,
+    private readonly audit: AdminAuditService,
+    private readonly analytics: AdminAnalyticsService,
+    private readonly billing: BillingService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  @Post('guardians')
+  @RequirePermissions('admin:guardians:write')
+  createGuardian(
+    @Body() dto: CreateGuardianDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.create(dto, user);
+  }
+
+  @Get('guardians')
+  @RequirePermissions('admin:guardians:read')
+  listGuardians(@Query() query: ListGuardiansQueryDto) {
+    return this.guardians.list(query);
+  }
+
+  @Get('guardians/:id')
+  @RequirePermissions('admin:guardians:read')
+  getGuardian(@Param('id', ParseUUIDPipe) id: string) {
+    return this.guardians.getOne(id);
+  }
+
+  @Patch('guardians/:id')
+  @RequirePermissions('admin:guardians:write')
+  updateGuardian(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateGuardianDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.update(id, dto, user);
+  }
+
+  @Post('guardians/:id/vetting')
+  @RequirePermissions('admin:guardians:write')
+  upsertVetting(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateVettingDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.upsertVetting(id, dto, user);
+  }
+
+  @Post('guardians/:id/certifications')
+  @RequirePermissions('admin:guardians:write')
+  addCertification(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminCreateCertificationDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.addCertification(id, dto, user);
+  }
+
+  @Post('guardians/:id/activate')
+  @RequirePermissions('admin:guardians:activate')
+  activateGuardian(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.activate(id, user);
+  }
+
+  @Post('guardians/:id/suspend')
+  @RequirePermissions('admin:guardians:suspend')
+  suspendGuardian(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardians.suspend(id, user);
+  }
+
+  @Get('verification/organizations')
+  @RequirePermissions('admin:verification:read')
+  listPendingOrgs() {
+    return this.verification.listPendingOrganizations();
+  }
+
+  @Patch('verification/organizations/:id')
+  @RequirePermissions('admin:verification:write')
+  reviewOrg(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewVerificationDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.verification.reviewOrganization(
+      id,
+      dto.status as VerificationStatus,
+      user.sub,
+      dto.reason,
+    );
+  }
+
+  @Get('verification/guardians')
+  @RequirePermissions('admin:verification:read')
+  listPendingGuardians() {
+    return this.verification.listPendingGuardians();
+  }
+
+  @Patch('verification/guardians/:id')
+  @RequirePermissions('admin:verification:write')
+  reviewGuardian(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewVerificationDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.verification.reviewGuardian(
+      id,
+      dto.status as GuardianVerificationStatus,
+      user.sub,
+    );
+  }
+
+  @Patch('verification/certifications/:id')
+  @RequirePermissions('admin:verification:write')
+  reviewCert(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewVerificationDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.verification.reviewCertification(
+      id,
+      dto.status as CertificationVerificationStatus,
+      user.sub,
+    );
+  }
+
+  @Get('pricing-rules')
+  @RequirePermissions('admin:pricing:read')
+  listPricing() {
+    return this.pricing.list();
+  }
+
+  @Post('pricing-rules')
+  @RequirePermissions('admin:pricing:write')
+  createPricing(
+    @Body()
+    body: {
+      priority: number;
+      organizationId?: string;
+      district?: string;
+      jobType?: JobType;
+      pricingModel: PricingModel;
+      hourlyRate?: number;
+      flatFee?: number;
+    },
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.pricing.create(body, user.sub);
+  }
+
+  @Patch('pricing-rules/:id')
+  @RequirePermissions('admin:pricing:write')
+  updatePricing(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.pricing.update(id, body, user.sub);
+  }
+
+  @Get('invoices')
+  @RequirePermissions('admin:invoices:read')
+  listInvoices(
+    @Query() query: PaginationQueryDto,
+    @Query('status') status?: InvoiceStatus,
+  ) {
+    return this.billing.listAdmin(query, status ? { status } : undefined);
+  }
+
+  @Get('payments')
+  @RequirePermissions('admin:payments:read')
+  listPayments(@Query() query: PaginationQueryDto) {
+    const skip = (query.page - 1) * query.limit;
+    return this.prisma.payment.findMany({
+      skip,
+      take: query.limit,
+      orderBy: { createdAt: 'desc' },
+      include: { invoice: true },
+    });
+  }
+
+  @Get('audit-logs')
+  @RequirePermissions('admin:audit:read')
+  searchAudit(
+    @Query() query: PaginationQueryDto,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('entityType') entityType?: string,
+  ) {
+    return this.audit.search(query, { actorUserId, entityType });
+  }
+
+  @Get('analytics/jobs')
+  @RequirePermissions('admin:analytics:read')
+  jobAnalytics(@Query('district') district?: string) {
+    return this.analytics.jobFacts({ district });
+  }
+
+  @Get('analytics/guardians')
+  @RequirePermissions('admin:analytics:read')
+  guardianAnalytics(@Query('guardianId') guardianId?: string) {
+    return this.analytics.guardianPerformance(guardianId);
+  }
+
+  @Get('analytics/dashboard')
+  @RequirePermissions('admin:analytics:read')
+  dashboard() {
+    return this.analytics.dashboard();
+  }
+}
