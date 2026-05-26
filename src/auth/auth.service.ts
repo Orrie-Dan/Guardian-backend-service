@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   GoneException,
   Injectable,
   NotFoundException,
@@ -12,9 +13,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { assertUserCanSignIn } from './auth-gates';
 import { loadAuthUserPayload } from './auth-user.loader';
 import { RegisterClientApplicationDto } from './dto/register-client-application.dto';
+import { PasswordResetConfirmDto } from './dto/password-reset-confirm.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
-import { OtpService } from './otp.service';
 import { parseLoginIdentifier } from './login.util';
+import { OtpService } from './otp.service';
 import { normalizePhone } from './phone.util';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
@@ -30,14 +32,20 @@ export class AuthService {
     private readonly locationSetup: PrimaryLocationSetupPolicy,
   ) {}
 
-  /** @deprecated Use signInRequestOtp */
-  requestOtp(phone: string, ipAddress?: string, deviceFingerprint?: string) {
-    return this.signInRequestOtp(phone, ipAddress, deviceFingerprint);
+  /** @deprecated Use POST /auth/sign-in/otp/request */
+  deprecatedOtpRequest() {
+    throw new GoneException({
+      code: 'ENDPOINT_DEPRECATED',
+      message: 'Use POST /auth/sign-in/otp/request',
+    });
   }
 
-  /** @deprecated Use signInVerifyOtp */
-  verifyOtp(phone: string, code: string) {
-    return this.signInVerifyOtp(phone, code);
+  /** @deprecated Use POST /auth/sign-in/otp/verify */
+  deprecatedOtpVerify() {
+    throw new GoneException({
+      code: 'ENDPOINT_DEPRECATED',
+      message: 'Use POST /auth/sign-in/otp/verify',
+    });
   }
 
   async signInRequestOtp(
@@ -143,6 +151,36 @@ export class AuthService {
     });
   }
 
+  async passwordResetRequest(login: string) {
+    const user = await this.findUserForPasswordReset(login);
+    return this.otp.requestOtp(user.phoneNumber);
+  }
+
+  async passwordResetConfirm(dto: PasswordResetConfirmDto) {
+    this.passwords.assertMatch(dto.password, dto.confirmPassword);
+
+    const user = await this.findUserForPasswordReset(dto.login);
+    await this.otp.verifyOtp(user.phoneNumber, dto.code);
+    await assertUserCanSignIn(this.prisma, user);
+
+    const hash = await this.passwords.hash(dto.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash, passwordSetAt: new Date() },
+    });
+
+    await this.tokens.revokeAllRefreshTokensForUser(user.id);
+
+    await this.audit.log({
+      actorUserId: user.id,
+      action: 'PASSWORD_RESET',
+      entityType: 'identity.users',
+      entityId: user.id,
+    });
+
+    return this.buildAuthResponse(user.id, false);
+  }
+
   async setPassword(dto: SetPasswordDto, authenticatedUserId?: string) {
     this.passwords.assertMatch(dto.password, dto.confirmPassword);
 
@@ -168,6 +206,34 @@ export class AuthService {
     });
 
     return this.buildAuthResponse(userId, false);
+  }
+
+  private async findUserForPasswordReset(login: string) {
+    const identifier = parseLoginIdentifier(login);
+    const user = await this.prisma.user.findUnique({
+      where:
+        identifier.type === 'email'
+          ? { email: identifier.value }
+          : { phoneNumber: identifier.value },
+      include: { userRoles: { include: { role: true } } },
+    });
+
+    if (!user || user.status === UserStatus.DELETED) {
+      throw new NotFoundException({
+        code: 'USER_NOT_REGISTERED',
+        message: 'No account found for this login',
+      });
+    }
+
+    if (!user.passwordHash) {
+      throw new BadRequestException({
+        code: 'PASSWORD_NOT_SET',
+        message:
+          'No password on this account. Sign in with OTP and use POST /auth/password/set',
+      });
+    }
+
+    return user;
   }
 
   private async buildAuthResponse(userId: string, requiresPasswordSetup: boolean) {

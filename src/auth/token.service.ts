@@ -196,6 +196,26 @@ export class TokenService {
     }
   }
 
+  async revokeAllRefreshTokensForUser(userId: string): Promise<void> {
+    const active = await this.prisma.refreshToken.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    await Promise.all(
+      active.map(async (stored) => {
+        await this.revokeRefreshToken(stored.jti, stored.expiresAt);
+        await this.prisma.refreshToken.update({
+          where: { jti: stored.jti },
+          data: { revokedAt: new Date() },
+        });
+      }),
+    );
+  }
+
   async logout(refreshToken: string): Promise<void> {
     try {
       const decoded = await this.jwt.verifyAsync<{ jti: string }>(

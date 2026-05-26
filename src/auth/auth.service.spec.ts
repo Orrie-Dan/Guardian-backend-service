@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   GoneException,
   NotFoundException,
   UnauthorizedException,
@@ -26,6 +27,7 @@ describe('AuthService', () => {
     issueSetupToken: jest.fn(),
     verifySetupToken: jest.fn(),
     tryResolveAccessUserId: jest.fn(),
+    revokeAllRefreshTokensForUser: jest.fn(),
   };
   const passwords = {
     hash: jest.fn().mockResolvedValue('hashed'),
@@ -67,6 +69,96 @@ describe('AuthService', () => {
   it('registerApplication is deprecated', async () => {
     await expect(service.registerApplication({} as never)).rejects.toBeInstanceOf(
       GoneException,
+    );
+  });
+
+  it('deprecatedOtpRequest returns 410', () => {
+    expect(() => service.deprecatedOtpRequest()).toThrow(GoneException);
+  });
+
+  it('passwordResetRequest sends OTP to user phone', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      phoneNumber: '+250788123456',
+      passwordHash: 'hash',
+      status: UserStatus.ACTIVE,
+      userRoles: [],
+    });
+    otp.requestOtp.mockResolvedValue({ otpId: 'o1', expiresAt: new Date() });
+
+    await service.passwordResetRequest('+250788123456');
+
+    expect(otp.requestOtp).toHaveBeenCalledWith('+250788123456');
+  });
+
+  it('passwordResetRequest rejects account without password', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      phoneNumber: '+250788123456',
+      passwordHash: null,
+      status: UserStatus.ACTIVE,
+      userRoles: [],
+    });
+
+    await expect(service.passwordResetRequest('+250788123456')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('passwordResetConfirm updates password and revokes sessions', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      phoneNumber: '+250788123456',
+      passwordHash: 'old',
+      passwordSetAt: new Date(),
+      status: UserStatus.ACTIVE,
+      onboardingCompletedAt: new Date(),
+      isPhoneVerified: true,
+      userRoles: [{ role: { code: RoleCode.CLIENT_OWNER } }],
+    });
+    otp.verifyOtp.mockResolvedValue('+250788123456');
+    prisma.user.update.mockResolvedValue({});
+    prisma.organizationUser.findMany.mockResolvedValue([]);
+    (loadAuthUserPayload as jest.Mock).mockResolvedValue({
+      sub: 'u1',
+      roles: ['CLIENT_OWNER'],
+      activeRole: 'CLIENT_OWNER',
+      organizationIds: [],
+    });
+    tokens.issueTokens.mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: '15m',
+    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'u1',
+        phoneNumber: '+250788123456',
+        passwordHash: 'old',
+        passwordSetAt: new Date(),
+        status: UserStatus.ACTIVE,
+        onboardingCompletedAt: new Date(),
+        isPhoneVerified: true,
+        userRoles: [{ role: { code: RoleCode.CLIENT_OWNER } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'u1',
+        phoneNumber: '+250788123456',
+        fullName: 'Test',
+        passwordSetAt: new Date(),
+      });
+
+    const result = await service.passwordResetConfirm({
+      login: '+250788123456',
+      code: '123456',
+      password: 'newpass1',
+      confirmPassword: 'newpass1',
+    });
+
+    expect(tokens.revokeAllRefreshTokensForUser).toHaveBeenCalledWith('u1');
+    expect(result).toMatchObject({ accessToken: 'a' });
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PASSWORD_RESET' }),
     );
   });
 

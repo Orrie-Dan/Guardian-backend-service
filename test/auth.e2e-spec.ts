@@ -32,7 +32,7 @@ describe('Auth (e2e)', () => {
     'rejects verify without prior request',
     () => {
       return request(app.getHttpServer())
-        .post('/api/v1/auth/otp/verify')
+        .post('/api/v1/auth/sign-in/otp/verify')
         .send({ phone: '+250788000001', code: '000000' })
         .expect((res) => {
           expect([400, 401]).toContain(res.status);

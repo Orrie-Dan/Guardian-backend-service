@@ -62,7 +62,8 @@ import { RegisterStartDto } from './dto/register-v2/register-start.dto';
 
 import { RegisterStartVerifyDto } from './dto/register-v2/register-start-verify.dto';
 
-import { RequestOtpDto } from './dto/request-otp.dto';
+import { PasswordResetConfirmDto } from './dto/password-reset-confirm.dto';
+import { PasswordResetRequestDto } from './dto/password-reset-request.dto';
 
 import { SetContextDto } from './dto/set-context.dto';
 
@@ -74,7 +75,6 @@ import { SignInOtpVerifyDto } from './dto/sign-in-otp-verify.dto';
 
 import { SignInPasswordDto } from './dto/sign-in-password.dto';
 
-import { VerifyOtpDto } from './dto/verify-otp.dto';
 
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
@@ -448,13 +448,11 @@ export class AuthController {
 
   @Post('otp/request')
 
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({ summary: '[Removed] Use POST /auth/sign-in/otp/request' })
 
-  @ApiOperation({ summary: '[Deprecated] Alias for sign-in OTP request' })
+  deprecatedOtpRequest() {
 
-  requestOtp(@Body() dto: RequestOtpDto) {
-
-    return this.auth.signInRequestOtp(dto.phone);
+    return this.auth.deprecatedOtpRequest();
 
   }
 
@@ -464,13 +462,47 @@ export class AuthController {
 
   @Post('otp/verify')
 
+  @ApiOperation({ summary: '[Removed] Use POST /auth/sign-in/otp/verify' })
+
+  deprecatedOtpVerify() {
+
+    return this.auth.deprecatedOtpVerify();
+
+  }
+
+
+
+  @Public()
+
+  @Post('password/reset/request')
+
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+
+  @ApiOperation({
+
+    summary: 'Request password reset OTP (sent to account phone)',
+
+  })
+
+  passwordResetRequest(@Body() dto: PasswordResetRequestDto) {
+
+    return this.auth.passwordResetRequest(dto.login);
+
+  }
+
+
+
+  @Public()
+
+  @Post('password/reset/confirm')
+
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
 
-  @ApiOperation({ summary: '[Deprecated] Alias for sign-in OTP verify' })
+  @ApiOperation({ summary: 'Confirm reset OTP and set a new password' })
 
-  verifyOtp(@Body() dto: VerifyOtpDto) {
+  passwordResetConfirm(@Body() dto: PasswordResetConfirmDto) {
 
-    return this.auth.signInVerifyOtp(dto.phone, dto.code);
+    return this.auth.passwordResetConfirm(dto);
 
   }
 
