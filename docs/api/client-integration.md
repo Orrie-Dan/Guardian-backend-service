@@ -3,7 +3,7 @@
 How frontend and mobile apps should call the G2 Sentry Guardian API: which routes to use, when, and what to check before calling them.
 
 **Schemas and field types:** Swagger at `{API_URL}/docs` (source of truth).  
-**Deep flows:** [onboarding.md](onboarding.md), [auth.md](auth.md), [../user-journeys.md](../user-journeys.md).
+**Deep flows:** [onboarding.md](onboarding.md), [admin-onboarding.md](admin-onboarding.md), [auth.md](auth.md), [../user-journeys.md](../user-journeys.md).
 
 ## Base URL and headers
 
@@ -12,7 +12,7 @@ How frontend and mobile apps should call the G2 Sentry Guardian API: which route
 | Local API | `http://localhost:3000/api/v1` |
 | Prefix | From `API_PREFIX` (default `/api/v1`) |
 | Auth (protected routes) | `Authorization: Bearer <accessToken>` |
-| Content type | `application/json` unless uploading to S3 |
+| Content type | `application/json` unless uploading documents (`multipart/form-data`) |
 
 ## Which app uses what
 
@@ -22,7 +22,7 @@ How frontend and mobile apps should call the G2 Sentry Guardian API: which route
 | **Guardian app** | Field guardians | `/auth`, `/users`, `/guardians`, `/assignments`, `/jobs` (read), `/notifications` | `/auth/register/*`, `/admin/*` |
 | **Admin / ops portal** | `SUPER_ADMIN`, `OPS_ADMIN` | `/admin/*` (+ shared read routes as needed) | Client registration wizard |
 
-Guardians **cannot** call `POST /auth/register/*`. They are created by ops via `/admin/guardians`.
+Guardians **cannot** call `POST /auth/register/*`. They are created by ops via `POST /admin/guardians` — see [admin-onboarding.md](admin-onboarding.md).
 
 ---
 
@@ -65,29 +65,28 @@ When `NODE_ENV !== production`, OTP responses include **`devCode`**. See [gettin
 
 ---
 
-## Document upload (S3 presign)
+## Document upload (PostgreSQL)
 
-Same pattern everywhere; only the presign path differs.
+One-shot multipart upload; file bytes are stored in the database.
 
 ```mermaid
 sequenceDiagram
   participant App
   participant API
-  participant S3
+  participant DB
 
-  App->>API: POST .../presign
-  API-->>App: uploadUrl documentId
-  App->>S3: PUT uploadUrl (file bytes)
-  App->>API: POST .../:id/confirm
+  App->>API: POST multipart file plus documentType
+  API->>DB: INSERT document_storage with content
+  API-->>App: documentId
 ```
 
-| Context | Presign | Confirm |
-|---------|---------|---------|
-| Registration | `POST /auth/register/documents/presign` | `POST /auth/register/documents/:id/confirm` |
-| After login | `POST /documents/presign` | `POST /documents/:id/confirm` |
-| Download metadata | — | `GET /documents/:id` |
+| Context | Upload | Download |
+|---------|--------|----------|
+| Registration | `POST /auth/register/documents` (`file`, `documentType`) | — |
+| After login | `POST /documents` (`file`) | `GET /documents/:id` (metadata), `GET /documents/:id/content` (bytes) |
+| Admin review | — | `GET /admin/verification/documents/:documentId/content` |
 
-Upload the file to `uploadUrl` with the HTTP method and headers Swagger documents for that endpoint (typically `PUT`).
+Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`. Max size: `DOCUMENT_MAX_BYTES` (default 10 MB).
 
 ---
 
@@ -100,10 +99,10 @@ Upload the file to `uploadUrl` with the HTTP method and headers Swagger document
 | New user — phone OTP | `POST /auth/register/start` → `.../start/verify` | Returns `onboardingToken` |
 | Resume incomplete reg | `POST /auth/register/resume` | OTP or phone+password |
 | Wizard steps | `PATCH /auth/register/profile`, `.../business`, `.../payment`, `.../location` | Bearer onboarding token |
-| Upload verification docs | register presign/confirm | Rules by `orgType` — [onboarding.md](onboarding.md) |
+| Upload verification docs | `POST /auth/register/documents` | Rules by `orgType` — [onboarding.md](onboarding.md) |
 | Check wizard progress | `GET /auth/register/status` | |
 | Finish registration | `POST /auth/register/submit` | Returns access + refresh tokens |
-| Sign in | `POST /auth/sign-in/password` or OTP flow | `ONBOARDING_INCOMPLETE` if submit not done |
+| Sign in | `POST /auth/sign-in/password` (`login` = phone or email) or OTP | `ONBOARDING_INCOMPLETE` if submit not done |
 | Session | `POST /auth/refresh`, `POST /auth/logout` | |
 | Switch org | `POST /auth/context` | |
 
@@ -202,6 +201,32 @@ Recommended guardian loop while on duty:
 
 ---
 
+## Admin / ops portal — screen → API map
+
+For guardian onboarding and verification. Requires `SUPER_ADMIN` or `OPS_ADMIN` JWT. Field reference: [admin-onboarding.md](admin-onboarding.md).
+
+| Screen / action | API | Notes |
+|-----------------|-----|-------|
+| Sign in | `POST /auth/sign-in/password` with `login` = work email or phone | User must have admin role in DB |
+| Session | `GET /users/me` | Confirm `roles` includes `OPS_ADMIN` or `SUPER_ADMIN` |
+| Guardian list | `GET /admin/guardians` | Query filters: `status`, `verificationStatus` |
+| Create guardian | `POST /admin/guardians` | Phone, name, national ID, `districtBase`, optional vetting inline |
+| Guardian detail | `GET /admin/guardians/:id` | Certs, vetting, user phone |
+| Edit profile | `PATCH /admin/guardians/:id` | Partial update |
+| Record RNP vetting | `POST /admin/guardians/:id/vetting` | Upsert |
+| Add certification | `POST /admin/guardians/:id/certifications` | Starts `PENDING` |
+| Pending guardians queue | `GET /admin/verification/guardians` | |
+| Approve / reject guardian | `PATCH /admin/verification/guardians/:id` | `{ "status": "VERIFIED" }` before activate |
+| Approve / reject cert | `PATCH /admin/verification/certifications/:id` | Need ≥1 verified non-expired cert for duty |
+| Activate account | `POST /admin/guardians/:id/activate` | OTP to guardian; `devCode` in dev response |
+| Suspend | `POST /admin/guardians/:id/suspend` | |
+| Pending orgs (client KYC) | `GET /admin/verification/organizations` | Separate from guardian flow |
+| Approve / reject org | `PATCH /admin/verification/organizations/:id` | Reject requires `reason` |
+
+Recommended ops sequence after create: vetting → certification → verify cert → verify guardian → activate.
+
+---
+
 ## Client lifecycle (one diagram)
 
 ```mermaid
@@ -233,7 +258,7 @@ Details: [../user-journeys.md](../user-journeys.md) §1 and §4.
 | `GUARDIAN_NOT_ACTIVATED` | Guardian | Contact ops |
 | `PHONE_NOT_VERIFIED` | Both | Complete OTP step |
 
-Full auth list: [auth.md](auth.md). Registration list: [onboarding.md](onboarding.md).
+Full auth list: [auth.md](auth.md). Client registration: [onboarding.md](onboarding.md). Guardian onboarding: [admin-onboarding.md](admin-onboarding.md).
 
 API errors use a consistent JSON shape (see Swagger / actual responses); map `code` field when present.
 
@@ -260,7 +285,7 @@ API errors use a consistent JSON shape (see Swagger / actual responses); map `co
 POST /api/v1/auth/sign-in/password
 Content-Type: application/json
 
-{ "phone": "+250788000001", "password": "TestPass123!" }
+{ "login": "+250788000001", "password": "TestPass123!" }
 ```
 
 More: [getting-started.md](../getting-started.md).
@@ -272,7 +297,8 @@ More: [getting-started.md](../getting-started.md).
 | Doc | Use for |
 |-----|---------|
 | [README.md](README.md) | Controller index |
-| [onboarding.md](onboarding.md) | Registration + complete site |
+| [onboarding.md](onboarding.md) | Client registration + complete site |
+| [admin-onboarding.md](admin-onboarding.md) | Admin guardian create/activate |
 | [auth.md](auth.md) | Sign-in, tokens, errors |
 | [changelog.md](changelog.md) | Deprecated paths |
 | [../architecture.md](../architecture.md) | Permissions model (backend) |

@@ -49,8 +49,9 @@ Admin routes (`/admin/*`) require `SUPER_ADMIN` or `OPS_ADMIN`. Those roles are 
 | [docs/api/README.md](docs/api/README.md) | API overview (schemas live in Swagger) |
 | [docs/api/client-integration.md](docs/api/client-integration.md) | Client/mobile: screen → endpoint map |
 | [docs/api/onboarding.md](docs/api/onboarding.md) | Client registration v2, complete site |
+| [docs/api/admin-onboarding.md](docs/api/admin-onboarding.md) | Admin guardian create, vetting, activate |
 | [docs/api/auth.md](docs/api/auth.md) | Sign-in, tokens, session |
-| [docs/api/admin.md](docs/api/admin.md) | Admin guardian and verification APIs |
+| [docs/api/admin.md](docs/api/admin.md) | Admin route index and verification |
 | [docs/api/changelog.md](docs/api/changelog.md) | v1 route migrations and deprecations |
 
 ## Common commands

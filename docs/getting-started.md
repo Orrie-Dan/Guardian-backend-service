@@ -29,8 +29,9 @@ Guide for running the G2 Sentry Guardian API locally.
 | Redis | `REDIS_ENABLED`, `REDIS_URL` | Session/cache; disable locally if Redis is unavailable |
 | JWT | `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`, `JWT_REFRESH_EXPIRES_IN` | Access and refresh tokens — use strong random secrets in production |
 | OTP | `OTP_MAX_ATTEMPTS` | Brute-force limit for OTP verification |
+| SMS (Pindo) | `PINDO_ENABLED`, `PINDO_API_TOKEN`, `PINDO_SENDER` | Send OTP via [Pindo](https://pindo.io); required in production |
 | Dispatch | `DISPATCH_OFFER_TTL_MS` | How long guardian job offers remain valid (ms) |
-| Documents | `S3_BUCKET`, `S3_REGION` | Presigned upload targets for verification documents |
+| Documents | `DOCUMENT_MAX_BYTES` | Max upload size in bytes (default 10 MB); files stored in PostgreSQL |
 
 ## Database
 
@@ -79,6 +80,8 @@ npm run start:dev    # alias: npm run dev
 
 When `NODE_ENV` is not `production`, OTP endpoints include a **`devCode`** in the JSON response (see [`src/auth/otp.service.ts`](../src/auth/otp.service.ts)). Use it instead of SMS during local testing.
 
+To test real SMS locally, set `PINDO_ENABLED=true`, `PINDO_API_TOKEN`, and `PINDO_SENDER` (approved sender ID from your Pindo account). OTP is sent with `POST https://api.pindo.io/v1/sms/` as documented by Pindo.
+
 ### New client registration (v2)
 
 Phone-first flow — see [api/onboarding.md](api/onboarding.md):
@@ -96,7 +99,7 @@ POST /api/v1/auth/sign-in/password
 Content-Type: application/json
 
 {
-  "phone": "+250788000001",
+  "login": "+250788000001",
   "password": "TestPass123!"
 }
 ```

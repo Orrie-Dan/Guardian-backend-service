@@ -85,7 +85,7 @@ Registered in [`src/app.module.ts`](../src/app.module.ts).
 | `AdminModule` | Guardian onboarding, verification, pricing, audit | `/admin` |
 | `BillingModule` | Invoices | `/invoices` |
 | `PaymentsModule` | Payment initiation and confirm | `/payments` |
-| `DocumentsModule` | Authenticated document presign/confirm | `/documents` |
+| `DocumentsModule` | Document upload and download (bytes in PostgreSQL) | `/documents` |
 | `NotificationsModule` | User notifications | `/notifications` |
 | `RegionsModule` | Region reference data | `/regions` |
 | `WebhooksModule` | External webhooks | `/webhooks` |
@@ -167,7 +167,7 @@ Access payload ([`AuthUserPayload`](../src/auth/interfaces/auth-user.interface.t
 - **Redis:** OTP storage, refresh token revocation, optional caching ([`RedisModule`](../src/redis/redis.module.ts)).
 - **BullMQ / queue:** Background work ([`QueueModule`](../src/queue/queue.module.ts)).
 - **Outbox:** Reliable side effects ([`OutboxModule`](../src/outbox/outbox.module.ts)).
-- **S3:** Document presigned URLs ([`DocumentsService`](../src/documents/documents.service.ts)); configure `S3_BUCKET` and `S3_REGION`.
+- **Documents:** Verification file bytes stored in PostgreSQL `system.document_storage.content` ([`DocumentsService`](../src/documents/documents.service.ts)); configure `DOCUMENT_MAX_BYTES`.
 
 ## Related docs
 

@@ -9,7 +9,7 @@ Deployment and environment guidance for G2 Sentry Guardian.
 3. **Generate client** — `npx prisma generate` (usually part of CI build)
 4. **Secrets** — set production values for `JWT_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`; do not commit `.env`
 5. **Redis** — `REDIS_ENABLED=true` and reachable `REDIS_URL` for OTP and refresh revocation
-6. **S3** — `S3_BUCKET` and `S3_REGION` for document uploads
+6. **Documents** — `DOCUMENT_MAX_BYTES` (optional); verification files stored in PostgreSQL — plan DB backup size accordingly
 7. **Node** — runtime Node 20+
 
 ## Environment variables
@@ -22,7 +22,10 @@ Copy from [`.env.example`](../.env.example). Production must override all `chang
 | `DATABASE_URL` | Managed PostgreSQL; least-privilege DB user |
 | `JWT_SECRET` / `JWT_REFRESH_SECRET` | Long random strings; rotate with a planned logout window |
 | `REDIS_URL` | Highly available Redis instance |
-| `S3_*` | Real bucket with IAM restricted to presigned upload |
+| `DOCUMENT_MAX_BYTES` | Cap per-file upload size (default 10485760) |
+| `PINDO_ENABLED` | `true` in production |
+| `PINDO_API_TOKEN` | Bearer token from Pindo dashboard |
+| `PINDO_SENDER` | Registered sender name (e.g. your brand) |
 
 ## Running in production
 
@@ -59,10 +62,10 @@ Process manager (PM2, systemd, Kubernetes) should restart on failure and run hea
 | Symptom | Check |
 |---------|--------|
 | 401 on all routes | JWT secret mismatch between instances; clock skew |
-| OTP never arrives | SMS provider integration (dev uses `devCode` only when not production) |
+| OTP never arrives | `PINDO_ENABLED=true`, valid `PINDO_API_TOKEN` and `PINDO_SENDER`; check app logs for Pindo errors. Dev uses `devCode` when `NODE_ENV` is not `production`. |
 | `ORG_PENDING_VERIFICATION` | Expected until admin verifies org — not a bug |
 | Prisma errors after deploy | Migration not applied; run `migrate deploy` |
-| Upload failures | S3 credentials, bucket policy, CORS on presigned PUT |
+| Upload failures | File over `DOCUMENT_MAX_BYTES`; disallowed MIME type; multipart field names (`file`, `documentType` on registration) |
 
 ## Related
 

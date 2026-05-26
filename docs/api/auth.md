@@ -30,7 +30,7 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 | POST | `/auth/sign-in/otp/verify` | Verify sign-in OTP |
 
-| POST | `/auth/sign-in/password` | Primary login |
+| POST | `/auth/sign-in/password` | Primary login (phone or email + password) |
 
 | POST | `/auth/password/set` | Setup token or authenticated password change |
 
@@ -56,9 +56,30 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 
 
-**Guardians cannot self-register.** Use `/admin/guardians`.
+**Guardians cannot self-register.** Use `POST /admin/guardians` — see [admin-onboarding.md](admin-onboarding.md).
 
+### Password sign-in body
 
+`POST /auth/sign-in/password`
+
+```json
+{
+  "login": "+250788123456",
+  "password": "YourPassword"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `login` | **Phone** (E.164, e.g. `+250788123456`) **or email** (case-insensitive) |
+| `password` | Account password (min 8 characters) |
+
+Detection: if `login` contains `@`, it is treated as email; otherwise as phone (same normalization as OTP sign-in).
+
+Examples:
+
+- Client / guardian: `"login": "+250788000002"`
+- Ops admin: `"login": "ops@company.rw"` (user must have `email` set in `identity.users`)
 
 ## Error codes
 
@@ -74,7 +95,8 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 | `ONBOARDING_INCOMPLETE` | Sign-in before `POST /auth/register/submit` |
 
-| `INVALID_CREDENTIALS` | Wrong password |
+| `INVALID_CREDENTIALS` | Unknown login or wrong password |
+| `INVALID_LOGIN` | Empty or malformed `login` (bad email format) |
 
 | `ONBOARDING_TOKEN_INVALID` | Bad onboarding JWT (registration steps) |
 
@@ -121,9 +143,8 @@ When `NODE_ENV !== production`, OTP request responses include `devCode` for loca
 
 
 - [onboarding.md](onboarding.md) — registration + complete site
-
+- [admin-onboarding.md](admin-onboarding.md) — guardian onboarding (admin)
 - [user-journeys.md](../user-journeys.md)
-
 - [admin.md](admin.md)
 
 - [changelog.md](changelog.md)

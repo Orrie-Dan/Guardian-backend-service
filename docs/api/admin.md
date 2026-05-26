@@ -8,6 +8,8 @@ Swagger: `/docs` → tag **admin**
 
 ## Guardian onboarding
 
+**Full guide (request bodies, state after create, errors):** [admin-onboarding.md](admin-onboarding.md).
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/admin/guardians` | Create guardian profile (linked user) |
@@ -21,14 +23,12 @@ Swagger: `/docs` → tag **admin**
 
 ### Typical onboarding order
 
-1. `POST /admin/guardians`
+1. `POST /admin/guardians` — user + guardian + shift state (`INACTIVE` / `PENDING`)
 2. `POST /admin/guardians/:id/vetting`
 3. `POST /admin/guardians/:id/certifications`
 4. `PATCH /admin/verification/certifications/:id` → `VERIFIED`
 5. `PATCH /admin/verification/guardians/:id` → `VERIFIED`
-6. `POST /admin/guardians/:id/activate`
-
-Activation triggers OTP to the guardian phone. In development, the activate response may include `devCode` (see guardian service).
+6. `POST /admin/guardians/:id/activate` — requires step 5; sends OTP (`devCode` in dev)
 
 Guardian then signs in via `/auth/sign-in/password` or OTP and can `POST /guardians/me/shift/start` when eligibility rules pass.
 
@@ -67,5 +67,6 @@ The admin controller also exposes pricing, audit, analytics, and billing helpers
 
 ## Related
 
+- [admin-onboarding.md](admin-onboarding.md) — guardian create/activate field reference
 - [user-journeys.md](../user-journeys.md) — guardian and org approval flows
 - [auth.md](auth.md) — client registration (before admin org review)

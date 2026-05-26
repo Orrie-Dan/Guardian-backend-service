@@ -33,9 +33,7 @@ sequenceDiagram
   App->>API: PATCH register/business
 
   loop Verification documents
-    App->>API: POST register/documents/presign
-    App->>API: PUT uploadUrl
-    App->>API: POST register/documents/:id/confirm
+    App->>API: POST register/documents
   end
 
   App->>API: PATCH register/payment
@@ -122,7 +120,7 @@ sequenceDiagram
 
 Suspend: `POST /admin/guardians/:id/suspend`.
 
-Full route list: [api/admin.md](api/admin.md).
+Request bodies, initial DB state, and enums: [api/admin-onboarding.md](api/admin-onboarding.md). Route index: [api/admin.md](api/admin.md).
 
 ### Dispatch eligibility
 

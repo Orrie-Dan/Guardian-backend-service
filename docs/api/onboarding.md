@@ -12,8 +12,7 @@ Phone-first, resumable registration. Use Swagger (`/docs`) for request/response 
 | 1b | POST | `/auth/register/start/verify` | Public — verify OTP, get `onboardingToken` (7 days) |
 | 2 | PATCH | `/auth/register/profile` | Bearer `onboardingToken` |
 | 3 | PATCH | `/auth/register/business` | Bearer `onboardingToken` — creates organization |
-| 4 | POST | `/auth/register/documents/presign` | Bearer `onboardingToken` |
-| 4 | POST | `/auth/register/documents/:id/confirm` | Bearer `onboardingToken` |
+| 4 | POST | `/auth/register/documents` | Bearer `onboardingToken` — multipart `file` + `documentType` |
 | 5 | PATCH | `/auth/register/payment` | Bearer `onboardingToken` |
 | 6 | PATCH | `/auth/register/location` | Bearer `onboardingToken` — address only (no lat/lon) |
 | — | GET | `/auth/register/status` | Bearer `onboardingToken` |
