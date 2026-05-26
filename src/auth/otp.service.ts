@@ -3,10 +3,12 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { PindoSmsService } from '../sms/pindo-sms.service';
 import { normalizePhone } from './phone.util';
 
 const OTP_TTL_MS = 5 * 60_000;
@@ -16,7 +18,12 @@ const MAX_ATTEMPTS = 5;
 
 @Injectable()
 export class OtpService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OtpService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pindoSms: PindoSmsService,
+  ) {}
 
   async requestOtp(
     phone: string,
@@ -52,6 +59,8 @@ export class OtpService {
         deviceFingerprint,
       },
     });
+
+    await this.deliverOtp(normalized, code);
 
     return {
       otpId: otp.id,
@@ -94,6 +103,29 @@ export class OtpService {
     });
 
     return normalized;
+  }
+
+  private async deliverOtp(phone: string, code: string): Promise<void> {
+    if (!this.pindoSms.isConfigured()) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new HttpException(
+          'SMS delivery is not configured',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      }
+      return;
+    }
+
+    try {
+      await this.pindoSms.sendOtp(phone, code);
+    } catch (err) {
+      if (process.env.NODE_ENV === 'production') {
+        throw err;
+      }
+      this.logger.warn(
+        `Pindo SMS failed in ${process.env.NODE_ENV ?? 'development'}; use devCode from API response`,
+      );
+    }
   }
 
   private generateCode(): string {

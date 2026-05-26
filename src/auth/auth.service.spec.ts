@@ -131,5 +131,58 @@ describe('AuthService', () => {
 
     const result = await service.signInWithPassword('+250788123456', 'password');
     expect(result).toMatchObject({ accessToken: 'a', refreshToken: 'r' });
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { phoneNumber: '+250788123456' },
+      }),
+    );
+  });
+
+  it('signInWithPassword looks up user by email', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u-admin',
+      passwordHash: 'hash',
+      passwordSetAt: new Date(),
+      status: UserStatus.ACTIVE,
+      isPhoneVerified: true,
+      userRoles: [{ role: { code: RoleCode.OPS_ADMIN } }],
+    });
+    passwords.verify.mockResolvedValue(true);
+    prisma.user.update.mockResolvedValue({});
+    prisma.organizationUser.findMany.mockResolvedValue([]);
+    (loadAuthUserPayload as jest.Mock).mockResolvedValue({
+      sub: 'u-admin',
+      roles: ['OPS_ADMIN'],
+      activeRole: 'OPS_ADMIN',
+      organizationIds: [],
+    });
+    tokens.issueTokens.mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: '15m',
+    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'u-admin',
+        passwordHash: 'hash',
+        passwordSetAt: new Date(),
+        status: UserStatus.ACTIVE,
+        isPhoneVerified: true,
+        userRoles: [{ role: { code: RoleCode.OPS_ADMIN } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'u-admin',
+        phoneNumber: '+250788000099',
+        fullName: 'Ops',
+        passwordSetAt: new Date(),
+      });
+
+    await service.signInWithPassword('Ops@Company.RW', 'password');
+
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: 'ops@company.rw' },
+      }),
+    );
   });
 });

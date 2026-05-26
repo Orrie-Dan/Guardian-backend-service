@@ -14,6 +14,7 @@ import { loadAuthUserPayload } from './auth-user.loader';
 import { RegisterClientApplicationDto } from './dto/register-client-application.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
 import { OtpService } from './otp.service';
+import { parseLoginIdentifier } from './login.util';
 import { normalizePhone } from './phone.util';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
@@ -80,16 +81,19 @@ export class AuthService {
     return this.buildAuthResponse(user.id, user.passwordSetAt === null);
   }
 
-  async signInWithPassword(phone: string, password: string) {
-    const normalized = normalizePhone(phone);
+  async signInWithPassword(login: string, password: string) {
+    const identifier = parseLoginIdentifier(login);
     const user = await this.prisma.user.findUnique({
-      where: { phoneNumber: normalized },
+      where:
+        identifier.type === 'email'
+          ? { email: identifier.value }
+          : { phoneNumber: identifier.value },
       include: { userRoles: { include: { role: true } } },
     });
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
-        message: 'Invalid phone or password',
+        message: 'Invalid login or password',
       });
     }
 
@@ -97,7 +101,7 @@ export class AuthService {
     if (!valid) {
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
-        message: 'Invalid phone or password',
+        message: 'Invalid login or password',
       });
     }
 

@@ -1,5 +1,7 @@
 import {
 
+  BadRequestException,
+
   Body,
 
   Controller,
@@ -16,13 +18,25 @@ import {
 
   Req,
 
+  UploadedFile,
+
   UseGuards,
+
+  UseInterceptors,
 
 } from '@nestjs/common';
 
+import { FileInterceptor } from '@nestjs/platform-express';
+
 import { Request } from 'express';
 
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import { Throttle } from '@nestjs/throttler';
 
@@ -32,13 +46,7 @@ import { Public } from './decorators/public.decorator';
 
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
-import {
-
-  RegisterDocumentConfirmDto,
-
-  RegisterDocumentPresignDto,
-
-} from './dto/register-document.dto';
+import { RegisterDocumentUploadDto } from './dto/register-document.dto';
 
 import { PatchRegisterBusinessDto } from './dto/register-v2/patch-business.dto';
 
@@ -132,6 +140,8 @@ export class AuthController {
 
   @Public()
 
+  @ApiBearerAuth()
+
   @Patch('register/profile')
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -153,6 +163,8 @@ export class AuthController {
 
 
   @Public()
+
+  @ApiBearerAuth()
 
   @Patch('register/business')
 
@@ -176,55 +188,81 @@ export class AuthController {
 
   @Public()
 
-  @Post('register/documents/presign')
+  @ApiBearerAuth()
+
+  @Post('register/documents')
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
 
-  @ApiOperation({ summary: 'Registration: presign verification document' })
+  @UseInterceptors(FileInterceptor('file'))
 
-  registerDocumentPresign(
+  @ApiConsumes('multipart/form-data')
 
-    @Body() dto: RegisterDocumentPresignDto,
+  @ApiBody({
+
+    schema: {
+
+      type: 'object',
+
+      required: ['file', 'documentType'],
+
+      properties: {
+
+        file: { type: 'string', format: 'binary' },
+
+        documentType: {
+
+          type: 'string',
+
+          enum: [
+
+            'TIN_CERTIFICATE',
+
+            'BUSINESS_REGISTRATION',
+
+            'NATIONAL_ID',
+
+            'OTHER',
+
+          ],
+
+        },
+
+      },
+
+    },
+
+  })
+
+  @ApiOperation({ summary: 'Registration: upload verification document' })
+
+  registerDocumentUpload(
+
+    @UploadedFile() file: Express.Multer.File,
+
+    @Body() dto: RegisterDocumentUploadDto,
 
     @Req() req: Request,
 
   ) {
 
-    return this.registerOnboarding.registerDocumentPresign(
+    if (!file?.buffer?.length) {
+
+      throw new BadRequestException({
+
+        code: 'DOCUMENT_FILE_REQUIRED',
+
+        message: 'File is required',
+
+      });
+
+    }
+
+    return this.registerOnboarding.registerDocumentUpload(
 
       req.headers.authorization,
 
-      dto,
-
-    );
-
-  }
-
-
-
-  @Public()
-
-  @Post('register/documents/:id/confirm')
-
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-
-  @ApiOperation({ summary: 'Registration: confirm document upload' })
-
-  registerDocumentConfirm(
-
-    @Param('id', ParseUUIDPipe) id: string,
-
-    @Body() dto: RegisterDocumentConfirmDto,
-
-    @Req() req: Request,
-
-  ) {
-
-    return this.registerOnboarding.registerDocumentConfirm(
-
-      req.headers.authorization,
-
-      id,
+      file,
 
       dto.documentType,
 
@@ -235,6 +273,8 @@ export class AuthController {
 
 
   @Public()
+
+  @ApiBearerAuth()
 
   @Patch('register/payment')
 
@@ -257,6 +297,8 @@ export class AuthController {
 
 
   @Public()
+
+  @ApiBearerAuth()
 
   @Patch('register/location')
 
@@ -284,6 +326,8 @@ export class AuthController {
 
   @Public()
 
+  @ApiBearerAuth()
+
   @Get('register/status')
 
   @ApiOperation({ summary: 'Registration progress (onboarding token)' })
@@ -297,6 +341,8 @@ export class AuthController {
 
 
   @Public()
+
+  @ApiBearerAuth()
 
   @Post('register/submit')
 
@@ -366,11 +412,11 @@ export class AuthController {
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
 
-  @ApiOperation({ summary: 'Sign in with phone and password' })
+  @ApiOperation({ summary: 'Sign in with phone or email and password' })
 
   signInPassword(@Body() dto: SignInPasswordDto) {
 
-    return this.auth.signInWithPassword(dto.phone, dto.password);
+    return this.auth.signInWithPassword(dto.login, dto.password);
 
   }
 

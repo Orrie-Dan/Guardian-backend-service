@@ -1,11 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MinLength } from 'class-validator';
+import { IsString, MinLength } from 'class-validator';
 
 export class SignInPasswordDto {
-  @ApiProperty({ example: '+250788123456' })
+  @ApiProperty({
+    example: '+250788123456',
+    description: 'Phone number (E.164) or email address',
+  })
   @IsString()
-  @Matches(/^\+[1-9]\d{7,14}$/)
-  phone!: string;
+  @MinLength(3)
+  login!: string;
 
   @ApiProperty({ minLength: 8 })
   @IsString()
