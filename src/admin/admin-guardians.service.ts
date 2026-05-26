@@ -22,6 +22,11 @@ import {
 } from '../common/dto/pagination-query.dto';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  DOCUMENT_METADATA_SELECT,
+  mapDocumentMetadata,
+  mapGuardianForAdmin,
+} from './admin-response.util';
 import { AdminCreateCertificationDto } from './dto/admin-create-certification.dto';
 import { CreateGuardianDto } from './dto/create-guardian.dto';
 import { CreateVettingDto } from './dto/create-vetting.dto';
@@ -135,7 +140,7 @@ export class AdminGuardiansService {
       where.verificationStatus = query.verificationStatus;
     }
 
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.guardian.findMany({
         where,
         skip,
@@ -149,6 +154,7 @@ export class AdminGuardiansService {
       this.prisma.guardian.count({ where }),
     ]);
 
+    const items = rows.map((row) => mapGuardianForAdmin(row));
     return { items, meta: buildPaginatedMeta(query.page, query.limit, total) };
   }
 
@@ -156,16 +162,52 @@ export class AdminGuardiansService {
     const guardian = await this.prisma.guardian.findUnique({
       where: { id },
       include: {
-        user: true,
+        user: {
+          select: {
+            id: true,
+            phoneNumber: true,
+            fullName: true,
+            email: true,
+            status: true,
+            dateOfBirth: true,
+            gender: true,
+            isPhoneVerified: true,
+            isEmailVerified: true,
+          },
+        },
         shiftState: true,
-        certifications: { include: { document: true } },
-        vettingRecord: { include: { clearanceDocument: true, vettedBy: true } },
+        certifications: {
+          include: { document: { select: DOCUMENT_METADATA_SELECT } },
+        },
+        vettingRecord: {
+          include: {
+            clearanceDocument: { select: DOCUMENT_METADATA_SELECT },
+            vettedBy: { select: { id: true, fullName: true } },
+          },
+        },
       },
     });
     if (!guardian) {
       throw new NotFoundException('Guardian not found');
     }
-    return guardian;
+
+    return {
+      ...mapGuardianForAdmin(guardian),
+      user: guardian.user,
+      shiftState: guardian.shiftState,
+      certifications: guardian.certifications.map((cert) => ({
+        ...cert,
+        document: cert.document ? mapDocumentMetadata(cert.document) : null,
+      })),
+      vettingRecord: guardian.vettingRecord
+        ? {
+            ...guardian.vettingRecord,
+            clearanceDocument: guardian.vettingRecord.clearanceDocument
+              ? mapDocumentMetadata(guardian.vettingRecord.clearanceDocument)
+              : null,
+          }
+        : null,
+    };
   }
 
   async update(id: string, dto: UpdateGuardianDto, actor: AuthUserPayload) {

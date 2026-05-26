@@ -12,6 +12,12 @@ import {
 import { AuditService } from '../common/services/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  DOCUMENT_METADATA_SELECT,
+  mapDocumentMetadata,
+  mapGuardianForAdmin,
+  mapLocation,
+} from './admin-response.util';
 
 @Injectable()
 export class AdminVerificationService {
@@ -21,12 +27,16 @@ export class AdminVerificationService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  listPendingOrganizations() {
-    return this.prisma.organization.findMany({
+  async listPendingOrganizations() {
+    const rows = await this.prisma.organization.findMany({
       where: { verificationStatus: VerificationStatus.PENDING },
       orderBy: { createdAt: 'asc' },
       include: {
-        verificationDocuments: { include: { document: true } },
+        verificationDocuments: {
+          include: {
+            document: { select: DOCUMENT_METADATA_SELECT },
+          },
+        },
         users: {
           include: {
             user: { select: { phoneNumber: true, fullName: true, email: true } },
@@ -35,6 +45,15 @@ export class AdminVerificationService {
         locations: true,
       },
     });
+
+    return rows.map((org) => ({
+      ...org,
+      locations: org.locations.map(mapLocation),
+      verificationDocuments: org.verificationDocuments.map((row) => ({
+        ...row,
+        document: mapDocumentMetadata(row.document),
+      })),
+    }));
   }
 
   async reviewOrganization(
@@ -97,11 +116,37 @@ export class AdminVerificationService {
     return org;
   }
 
-  listPendingGuardians() {
-    return this.prisma.guardian.findMany({
+  async listPendingGuardians() {
+    const rows = await this.prisma.guardian.findMany({
       where: { verificationStatus: GuardianVerificationStatus.PENDING },
-      include: { user: true, certifications: true },
+      include: {
+        user: {
+          select: {
+            id: true,
+            phoneNumber: true,
+            fullName: true,
+            email: true,
+            status: true,
+          },
+        },
+        certifications: {
+          include: {
+            document: { select: DOCUMENT_METADATA_SELECT },
+          },
+        },
+      },
       orderBy: { joinedAt: 'asc' },
+    });
+
+    return rows.map((guardian) => {
+      const mapped = mapGuardianForAdmin(guardian);
+      return {
+        ...mapped,
+        certifications: guardian.certifications.map((cert) => ({
+          ...cert,
+          document: cert.document ? mapDocumentMetadata(cert.document) : null,
+        })),
+      };
     });
   }
 
@@ -121,7 +166,7 @@ export class AdminVerificationService {
       entityId: id,
       afterState: { status },
     });
-    return guardian;
+    return mapGuardianForAdmin(guardian);
   }
 
   async reviewCertification(
