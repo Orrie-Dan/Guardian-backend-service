@@ -270,7 +270,8 @@ API errors use a consistent JSON shape (see Swagger / actual responses); map `co
 |--------|--------|
 | `/admin/*` | Ops portal only |
 | `/webhooks/*` | Server-to-server (payment providers) |
-| `/auth/otp/request`, `/auth/otp/verify` | Deprecated — use `/auth/sign-in/otp/*` |
+| `/auth/otp/request`, `/auth/otp/verify` | **410 Gone** — use `/auth/sign-in/otp/*` |
+| Forgot password | `POST /auth/password/reset/request` → `.../confirm` |
 
 ---
 

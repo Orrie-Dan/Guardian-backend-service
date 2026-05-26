@@ -42,6 +42,12 @@ See [onboarding.md](onboarding.md).
 | `PRIMARY_LOCATION_SETUP_REQUIRED` | Job/payment before map pin |
 | `REJECTION_REASON_REQUIRED` | Admin reject without reason |
 
+## Auth cleanup
+
+**Removed** deprecated OTP aliases (`POST /auth/otp/request`, `POST /auth/otp/verify`) — now return **410 Gone**; use `/auth/sign-in/otp/*`.
+
+**Added** password reset: `POST /auth/password/reset/request`, `POST /auth/password/reset/confirm` (OTP to registered phone; supports login by phone or email).
+
 ## Sign-in (existing users)
 
 **Breaking:** `POST /auth/sign-in/password` body field `phone` renamed to **`login`** (phone E.164 or email). Error message: `Invalid login or password`.

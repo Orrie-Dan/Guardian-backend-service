@@ -82,6 +82,7 @@ Details: [api/onboarding.md](api/onboarding.md), [api/admin.md](api/admin.md).
 |--------|----------|
 | Primary login | `POST /auth/sign-in/password` |
 | OTP login (existing users) | `POST /auth/sign-in/otp/request` → `.../verify` |
+| Forgot password | `POST /auth/password/reset/request` → `.../confirm` |
 | Refresh | `POST /auth/refresh` |
 | Logout | `POST /auth/logout` |
 | Switch organization | `POST /auth/context` |

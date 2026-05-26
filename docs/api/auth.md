@@ -32,7 +32,11 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 | POST | `/auth/sign-in/password` | Primary login (phone or email + password) |
 
-| POST | `/auth/password/set` | Setup token or authenticated password change |
+| POST | `/auth/password/set` | First-time setup (`setupToken`) or change while authenticated |
+
+| POST | `/auth/password/reset/request` | Forgot password — OTP to registered phone |
+
+| POST | `/auth/password/reset/confirm` | Verify OTP and set new password (issues tokens) |
 
 | POST | `/auth/refresh` | Rotate refresh token |
 
@@ -42,7 +46,7 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 
 
-## Deprecated aliases
+## Removed aliases (410 Gone)
 
 
 
@@ -53,6 +57,26 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 | `POST /auth/otp/request` | `POST /auth/sign-in/otp/request` |
 
 | `POST /auth/otp/verify` | `POST /auth/sign-in/otp/verify` |
+
+
+
+## Password reset
+
+
+
+`POST /auth/password/reset/request` — body `{ "login": "+250..." }` or email. OTP is sent to the account’s **registered phone** (email is supported for lookup only).
+
+
+
+`POST /auth/password/reset/confirm` — body `{ "login", "code", "password", "confirmPassword" }`. On success returns tokens like password sign-in and revokes existing refresh tokens.
+
+
+
+| Code | When |
+
+|------|------|
+
+| `PASSWORD_NOT_SET` | Reset requested for an account with no password yet |
 
 
 
@@ -97,6 +121,7 @@ Examples:
 
 | `INVALID_CREDENTIALS` | Unknown login or wrong password |
 | `INVALID_LOGIN` | Empty or malformed `login` (bad email format) |
+| `PASSWORD_NOT_SET` | Password reset for account without a password yet |
 
 | `ONBOARDING_TOKEN_INVALID` | Bad onboarding JWT (registration steps) |
 
