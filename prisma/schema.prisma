@@ -897,6 +897,7 @@ model DocumentStorage {
   storageKey String   @unique @map("storage_key") @db.VarChar(500)
   mimeType   String   @map("mime_type") @db.VarChar(100)
   sizeBytes  BigInt   @map("size_bytes")
+  content    Bytes?   @map("content")
   encrypted  Boolean  @default(true)
   uploadedBy String?  @map("uploaded_by") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at")
