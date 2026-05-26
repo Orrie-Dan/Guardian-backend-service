@@ -34,7 +34,7 @@ describe('RegisterOnboardingService', () => {
     verify: jest.fn(),
     assertMatch: jest.fn(),
   };
-  const documents = { presign: jest.fn(), confirm: jest.fn() };
+  const documents = { upload: jest.fn() };
   const auth = { issueFullAuthResponse: jest.fn().mockResolvedValue({ accessToken: 'a' }) };
   const audit = { log: jest.fn() };
 

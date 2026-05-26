@@ -28,9 +28,6 @@ import { PatchRegisterPaymentDto } from './dto/register-v2/patch-payment.dto';
 import { PatchRegisterProfileDto } from './dto/register-v2/patch-profile.dto';
 import { RegisterResumeDto } from './dto/register-v2/register-resume.dto';
 import {
-  RegisterDocumentPresignDto,
-} from './dto/register-document.dto';
-import {
   getRequiredDocumentOptions,
   hasSatisfyingVerificationDocument,
   isDocumentTypeAllowedForOrg,
@@ -304,38 +301,9 @@ export class RegisterOnboardingService {
     };
   }
 
-  async registerDocumentPresign(
+  async registerDocumentUpload(
     authorizationHeader: string | undefined,
-    dto: RegisterDocumentPresignDto,
-  ) {
-    const ctx = await requireOnboardingOrg(
-      await resolveOnboardingContext(this.tokens, this.prisma, authorizationHeader),
-    );
-
-    const org = await this.prisma.organization.findUnique({
-      where: { id: ctx.organizationId },
-      select: { orgType: true },
-    });
-    if (
-      org &&
-      !isDocumentTypeAllowedForOrg(org.orgType, dto.documentType)
-    ) {
-      throw new BadRequestException({
-        code: 'DOCUMENT_TYPE_NOT_ALLOWED_FOR_ORG',
-        message: `Document type ${dto.documentType} is not accepted for this organization type`,
-      });
-    }
-
-    const presign = await this.documents.presign(toOnboardingActor(ctx), {
-      mimeType: dto.mimeType,
-      sizeBytes: dto.sizeBytes,
-    });
-    return { ...presign, documentType: dto.documentType };
-  }
-
-  async registerDocumentConfirm(
-    authorizationHeader: string | undefined,
-    documentId: string,
+    file: Express.Multer.File,
     documentType: OrgVerificationDocumentType,
   ) {
     const ctx = await requireOnboardingOrg(
@@ -356,18 +324,21 @@ export class RegisterOnboardingService {
       });
     }
 
-    await this.documents.confirm(documentId, toOnboardingActor(ctx));
+    const uploaded = await this.documents.upload(toOnboardingActor(ctx), {
+      buffer: file.buffer,
+      mimeType: file.mimetype,
+    });
 
     const link = await this.prisma.organizationVerificationDocument.upsert({
       where: {
         organizationId_documentId: {
           organizationId: ctx.organizationId,
-          documentId,
+          documentId: uploaded.documentId,
         },
       },
       create: {
         organizationId: ctx.organizationId,
-        documentId,
+        documentId: uploaded.documentId,
         documentType,
       },
       update: { documentType },
@@ -390,7 +361,14 @@ export class RegisterOnboardingService {
       });
     }
 
-    return { link, onboardingStep: OnboardingStep.DOCUMENTS_UPLOADED };
+    return {
+      documentId: uploaded.documentId,
+      documentType,
+      mimeType: uploaded.mimeType,
+      sizeBytes: uploaded.sizeBytes,
+      link,
+      onboardingStep: OnboardingStep.DOCUMENTS_UPLOADED,
+    };
   }
 
   async getRegistrationStatus(authorizationHeader?: string) {
