@@ -7,8 +7,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiProduces, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import {
   CertificationVerificationStatus,
   GuardianVerificationStatus,
@@ -34,6 +37,7 @@ import { ListGuardiansQueryDto } from './dto/list-guardians-query.dto';
 import { ReviewVerificationDto } from './dto/review-verification.dto';
 import { UpdateGuardianDto } from './dto/update-guardian.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { DocumentsService } from '../documents/documents.service';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -42,6 +46,7 @@ export class AdminController {
   constructor(
     private readonly guardians: AdminGuardiansService,
     private readonly verification: AdminVerificationService,
+    private readonly documents: DocumentsService,
     private readonly pricing: AdminPricingService,
     private readonly audit: AdminAuditService,
     private readonly analytics: AdminAnalyticsService,
@@ -122,6 +127,21 @@ export class AdminController {
   @RequirePermissions('admin:verification:read')
   listPendingOrgs() {
     return this.verification.listPendingOrganizations();
+  }
+
+  @Get('verification/documents/:documentId/content')
+  @RequirePermissions('admin:verification:read')
+  @ApiProduces('application/octet-stream')
+  async getVerificationDocumentContent(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @CurrentUser() user: AuthUserPayload,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { buffer, mimeType } =
+      await this.documents.getVerificationDocumentContent(documentId, user);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', 'inline');
+    return new StreamableFile(buffer);
   }
 
   @Patch('verification/organizations/:id')
