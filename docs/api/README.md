@@ -19,6 +19,7 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | [client-integration.md](client-integration.md) | **Frontend/mobile:** which API for which screen, tokens, upload pattern |
 | [onboarding.md](onboarding.md) | Client registration v2, complete site, error codes |
 | [admin-onboarding.md](admin-onboarding.md) | **Admin:** guardian create, vetting, verify, activate |
+| [admin-pricing.md](admin-pricing.md) | **Admin:** pricing rule setup, precedence, examples |
 | [auth.md](auth.md) | Sign-in, tokens |
 | [admin.md](admin.md) | Admin route index, org/guardian/cert verification |
 | [changelog.md](changelog.md) | v1 breaking changes, route migrations, deprecations |

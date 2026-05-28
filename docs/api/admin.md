@@ -63,10 +63,13 @@ Guardians receive job offers only when:
 
 ## Other admin capabilities
 
-The admin controller also exposes pricing, audit, analytics, and billing helpers for operations — see Swagger for the full list under `/admin`.
+The admin controller also exposes pricing, audit, analytics, and billing helpers for operations.
+
+Pricing setup guide: [admin-pricing.md](admin-pricing.md).
 
 ## Related
 
 - [admin-onboarding.md](admin-onboarding.md) — guardian create/activate field reference
+- [admin-pricing.md](admin-pricing.md) — pricing rule setup and precedence
 - [user-journeys.md](../user-journeys.md) — guardian and org approval flows
 - [auth.md](auth.md) — client registration (before admin org review)
