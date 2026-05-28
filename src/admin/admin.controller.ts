@@ -16,8 +16,6 @@ import {
   CertificationVerificationStatus,
   GuardianVerificationStatus,
   InvoiceStatus,
-  JobType,
-  PricingModel,
   VerificationStatus,
 } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -35,6 +33,8 @@ import { CreateGuardianDto } from './dto/create-guardian.dto';
 import { CreateVettingDto } from './dto/create-vetting.dto';
 import { ListGuardiansQueryDto } from './dto/list-guardians-query.dto';
 import { ReviewVerificationDto } from './dto/review-verification.dto';
+import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
+import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
 import { UpdateGuardianDto } from './dto/update-guardian.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
@@ -129,6 +129,16 @@ export class AdminController {
     return this.verification.listPendingOrganizations();
   }
 
+  @Get('organizations')
+  @RequirePermissions('admin:verification:read')
+  listOrganizations(
+    @Query() query: PaginationQueryDto,
+    @Query('status') status?: VerificationStatus,
+    @Query('search') search?: string,
+  ) {
+    return this.verification.listOrganizations(query, { status, search });
+  }
+
   @Get('verification/documents/:documentId/content')
   @RequirePermissions('admin:verification:read')
   @ApiProduces('application/octet-stream')
@@ -202,16 +212,7 @@ export class AdminController {
   @Post('pricing-rules')
   @RequirePermissions('admin:pricing:write')
   createPricing(
-    @Body()
-    body: {
-      priority: number;
-      organizationId?: string;
-      district?: string;
-      jobType?: JobType;
-      pricingModel: PricingModel;
-      hourlyRate?: number;
-      flatFee?: number;
-    },
+    @Body() body: CreatePricingRuleDto,
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.pricing.create(body, user.sub);
@@ -221,7 +222,7 @@ export class AdminController {
   @RequirePermissions('admin:pricing:write')
   updatePricing(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: UpdatePricingRuleDto,
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.pricing.update(id, body, user.sub);
