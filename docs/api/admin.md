@@ -6,6 +6,21 @@ Requires Bearer JWT with role **`SUPER_ADMIN`** or **`OPS_ADMIN`**.
 
 Swagger: `/docs` → tag **admin**
 
+## User deletion (admin)
+
+Safe removal of test or mistaken accounts. Requires permission `admin:users:delete` (`SUPER_ADMIN` / `OPS_ADMIN` after seed).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/users/:id/delete-preview` | Dry-run: blockers, roles, guardian link |
+| DELETE | `/admin/users/:id?mode=soft` | **Default:** soft-delete — `status=DELETED`, anonymize email/phone, revoke tokens |
+| DELETE | `/admin/users/:id?mode=hard` | Permanently remove user (+ guardian rows). Dev only unless `ALLOW_HARD_USER_DELETE=true` |
+| POST | `/admin/users/bulk-delete` | Body: `{ "emails": ["a@b.com"], "mode": "soft" }` — per-email result |
+
+**Blockers (examples):** last `SUPER_ADMIN`, active jobs created by user, active guardian assignments, hard-delete while jobs/incidents still reference the user.
+
+Re-run `npm run db:seed:v1` (or permission seed) after deploy so `admin:users:delete` exists for ops roles.
+
 ## Guardian onboarding
 
 **Full guide (request bodies, state after create, errors):** [admin-onboarding.md](admin-onboarding.md).
@@ -23,14 +38,14 @@ Swagger: `/docs` → tag **admin**
 
 ### Typical onboarding order
 
-1. `POST /admin/guardians` — user + guardian + shift state (`INACTIVE` / `PENDING`)
+1. `POST /admin/guardians` — user + guardian + shift state (`INACTIVE` / `PENDING`) and temporary credentials dispatch (email first, SMS fallback)
 2. `POST /admin/guardians/:id/vetting`
 3. `POST /admin/guardians/:id/certifications`
 4. `PATCH /admin/verification/certifications/:id` → `VERIFIED`
 5. `PATCH /admin/verification/guardians/:id` → `VERIFIED`
 6. `POST /admin/guardians/:id/activate` — requires step 5; sends OTP (`devCode` in dev)
 
-Guardian then signs in via `/auth/sign-in/password` or OTP and can `POST /guardians/me/shift/start` when eligibility rules pass.
+Guardian then signs in via `/auth/sign-in/password` or OTP. If they used temporary credentials (`passwordSetAt = null`), sign-in returns `requiresPasswordSetup: true` and they must call `POST /auth/password/set` before normal password sessions. Afterward they can `POST /guardians/me/shift/start` when eligibility rules pass.
 
 ## Organization verification
 
@@ -51,11 +66,13 @@ Use after a client completes registration (step 2). Approving the org enables `c
 
 ## Dispatch eligibility (reference)
 
+Duty status map (offline / available / busy): [guardians.md](guardians.md).
+
 Guardians receive job offers only when:
 
 - `status = ACTIVE`
 - `verification_status = VERIFIED`
-- On duty (`shift_status = AVAILABLE`)
+- **Available** on duty (`shift_status = AVAILABLE`, `available_for_jobs = true`)
 - District matches `district_base` or `coverage_districts`
 - At least one certification: `VERIFIED` and not past `expiry_date`
 

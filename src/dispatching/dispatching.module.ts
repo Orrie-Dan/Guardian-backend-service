@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module';
 import { GuardiansModule } from '../guardians/guardians.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { RedisModule } from '../redis/redis.module';
 import { DispatchingService } from './dispatching.service';
@@ -10,6 +11,7 @@ import { DispatchingService } from './dispatching.service';
     forwardRef(() => OutboxModule),
     BillingModule,
     GuardiansModule,
+    NotificationsModule,
     RedisModule,
   ],
   providers: [DispatchingService],

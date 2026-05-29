@@ -20,6 +20,8 @@ import { OtpService } from './otp.service';
 import { normalizePhone } from './phone.util';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +32,7 @@ export class AuthService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly locationSetup: PrimaryLocationSetupPolicy,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   /** @deprecated Use POST /auth/sign-in/otp/request */
@@ -63,7 +66,9 @@ export class AuthService {
         message: 'No account found for this phone number',
       });
     }
-    return this.otp.requestOtp(normalized, ipAddress, deviceFingerprint);
+    return this.otp.requestOtp(normalized, ipAddress, deviceFingerprint, {
+      purpose: 'sign_in',
+    });
   }
 
   async signInVerifyOtp(phone: string, code: string) {
@@ -120,7 +125,7 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    return this.buildAuthResponse(user.id, false);
+    return this.buildAuthResponse(user.id, !user.passwordSetAt);
   }
 
   issueFullAuthResponse(userId: string) {
@@ -153,7 +158,9 @@ export class AuthService {
 
   async passwordResetRequest(login: string) {
     const user = await this.findUserForPasswordReset(login);
-    return this.otp.requestOtp(user.phoneNumber);
+    return this.otp.requestOtp(user.phoneNumber, undefined, undefined, {
+      purpose: 'password_reset',
+    });
   }
 
   async passwordResetConfirm(dto: PasswordResetConfirmDto) {
@@ -177,6 +184,13 @@ export class AuthService {
       entityType: 'identity.users',
       entityId: user.id,
     });
+
+    await this.emails.sendToUser(
+      user.id,
+      EmailTemplateId.SECURITY_PASSWORD_RESET_COMPLETED,
+      {},
+      { entityType: 'identity.users', entityId: user.id },
+    );
 
     return this.buildAuthResponse(user.id, false);
   }
@@ -204,6 +218,13 @@ export class AuthService {
       entityType: 'identity.users',
       entityId: userId,
     });
+
+    await this.emails.sendToUser(
+      userId,
+      EmailTemplateId.SECURITY_PASSWORD_SET,
+      {},
+      { entityType: 'identity.users', entityId: userId },
+    );
 
     return this.buildAuthResponse(userId, false);
   }

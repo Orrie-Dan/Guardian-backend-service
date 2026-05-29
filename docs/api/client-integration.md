@@ -3,7 +3,7 @@
 How frontend and mobile apps should call the G2 Sentry Guardian API: which routes to use, when, and what to check before calling them.
 
 **Schemas and field types:** Swagger at `{API_URL}/docs` (source of truth).  
-**Deep flows:** [onboarding.md](onboarding.md), [admin-onboarding.md](admin-onboarding.md), [auth.md](auth.md), [../user-journeys.md](../user-journeys.md).
+**Deep flows:** [onboarding.md](onboarding.md), [admin-onboarding.md](admin-onboarding.md), [auth.md](auth.md), [guardians.md](guardians.md), [../user-journeys.md](../user-journeys.md).
 
 ## Base URL and headers
 
@@ -172,14 +172,17 @@ Poll or pull on app foreground; push is not described in this API surface yet.
 
 ### Profile & duty
 
-| Screen / goal | Endpoints | Notes |
-|---------------|-----------|-------|
-| Bootstrap | `GET /users/me` | `guardianId`, roles |
-| Guardian profile | `GET /guardians/me`, `PATCH /guardians/me` | |
-| Certifications | `GET /guardians/me/certifications` | |
-| **Go on duty** | `POST /guardians/me/shift/start` | Eligibility checks (verified, certs, etc.) |
-| **Go off duty** | `POST /guardians/me/shift/end` | |
-| Location while on job | `POST /guardians/me/heartbeat` | Send periodically while on active assignment |
+Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [guardians.md](guardians.md).
+
+| Screen / goal | Product state | Endpoints | Notes |
+|---------------|---------------|-----------|-------|
+| Bootstrap | — | `GET /users/me` | `guardianId`, roles |
+| Guardian profile | — | `GET /guardians/me`, `PATCH /guardians/me` | `GET /guardians/me` includes `shiftState` for current duty |
+| Certifications | — | `GET /guardians/me/certifications` | |
+| **Available** (on duty) | `AVAILABLE` | `POST /guardians/me/shift/start` | Eligibility checks (verified, certs, etc.) |
+| **Offline** (off duty) | `OFF_DUTY` | `POST /guardians/me/shift/end` | |
+| **Busy** (on assignment) | `BUSY` | — | Set by server; read via `GET /guardians/me` |
+| Location while on job | — | `POST /guardians/me/heartbeat` | Presence/location only; does not change duty state |
 
 ### Assignments & job execution
 

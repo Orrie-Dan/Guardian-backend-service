@@ -34,7 +34,7 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 | POST | `/auth/password/set` | First-time setup (`setupToken`) or change while authenticated |
 
-| POST | `/auth/password/reset/request` | Forgot password — OTP to registered phone |
+| POST | `/auth/password/reset/request` | Forgot password — OTP by SMS; email too when on file |
 
 | POST | `/auth/password/reset/confirm` | Verify OTP and set new password (issues tokens) |
 
@@ -64,7 +64,7 @@ See **[onboarding.md](onboarding.md)** for the phone-first v2 flow (`/auth/regis
 
 
 
-`POST /auth/password/reset/request` — body `{ "login": "+250..." }` or email. OTP is sent to the account’s **registered phone** (email is supported for lookup only).
+`POST /auth/password/reset/request` — body `{ "login": "+250..." }` or email. OTP is sent by **SMS** to the registered phone and by **email** when the account has an address on file (same code on both channels).
 
 
 
@@ -155,9 +155,13 @@ Claims include `activeOrgId`, `organizationIds`, and `orgId` (alias). Use `POST 
 
 
 
+## OTP delivery
+
+All OTP requests go through `OtpService`: a 6-digit code is always sent by SMS when Pindo is configured. If the phone maps to a user with an email address, the same code is also sent via SMTP (best-effort; does not block the API).
+
+Registration (`POST /auth/register/start`) runs before a user record exists, so only SMS applies there.
+
 ## Development OTP
-
-
 
 When `NODE_ENV !== production`, OTP request responses include `devCode` for local testing.
 

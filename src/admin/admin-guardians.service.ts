@@ -13,6 +13,8 @@ import {
   UserStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
+import { PasswordService } from '../auth/password.service';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { normalizePhone } from '../auth/phone.util';
 import { OtpService } from '../auth/otp.service';
@@ -22,6 +24,9 @@ import {
 } from '../common/dto/pagination-query.dto';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CredentialDeliveryService } from '../notifications/credential-delivery.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 import {
   DOCUMENT_METADATA_SELECT,
   mapDocumentMetadata,
@@ -39,6 +44,9 @@ export class AdminGuardiansService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly otp: OtpService,
+    private readonly passwords: PasswordService,
+    private readonly credentials: CredentialDeliveryService,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   async create(dto: CreateGuardianDto, actor: AuthUserPayload) {
@@ -65,6 +73,8 @@ export class AdminGuardiansService {
     const guardianCode = `G-${String(guardianCount + 1).padStart(5, '0')}`;
     const coverageDistricts =
       dto.coverageDistricts?.length ? dto.coverageDistricts : [dto.districtBase];
+    const temporaryPassword = this.generateTemporaryPassword();
+    const passwordHash = await this.passwords.hash(temporaryPassword);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -75,6 +85,7 @@ export class AdminGuardiansService {
           dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
           gender: dto.gender,
           status: UserStatus.PENDING_VERIFICATION,
+          passwordHash,
           userRoles: { create: { roleId: guardianRole.id, assignedBy: actor.sub } },
           guardianProfile: {
             create: {
@@ -119,6 +130,13 @@ export class AdminGuardiansService {
       return user;
     });
 
+    const credentialDelivery = await this.credentials.sendGuardianCredentials({
+      fullName: dto.fullName,
+      phoneNumber: phone,
+      email: dto.email,
+      temporaryPassword,
+    });
+
     await this.audit.log({
       actorUserId: actor.sub,
       action: 'GUARDIAN_CREATED_BY_ADMIN',
@@ -126,8 +144,27 @@ export class AdminGuardiansService {
       entityId: result.guardianProfile!.id,
       afterState: { phone, guardianCode },
     });
+    await this.audit.log({
+      actorUserId: actor.sub,
+      action: 'GUARDIAN_CREDENTIALS_DISPATCHED',
+      entityType: 'identity.users',
+      entityId: result.id,
+      afterState: {
+        dispatched: credentialDelivery.dispatched,
+        channel: credentialDelivery.channel,
+      },
+    });
 
-    return result.guardianProfile;
+    return {
+      ...result.guardianProfile,
+      credentialsDispatched: credentialDelivery.dispatched,
+      credentialsChannel: credentialDelivery.channel,
+    };
+  }
+
+  private generateTemporaryPassword(): string {
+    const raw = randomBytes(9).toString('base64url');
+    return `G2-${raw}`;
   }
 
   async list(query: ListGuardiansQueryDto) {
@@ -348,7 +385,12 @@ export class AdminGuardiansService {
       }),
     ]);
 
-    const otpResult = await this.otp.requestOtp(guardian.user.phoneNumber);
+    const otpResult = await this.otp.requestOtp(
+      guardian.user.phoneNumber,
+      undefined,
+      undefined,
+      { purpose: 'guardian_activation' },
+    );
     if (process.env.NODE_ENV !== 'production') {
       console.info(
         `[activation-otp] guardian=${guardianId} phone=${guardian.user.phoneNumber}`,
@@ -362,6 +404,13 @@ export class AdminGuardiansService {
       entityType: 'guardian.guardians',
       entityId: guardianId,
     });
+
+    await this.emails.sendToUser(
+      guardian.userId,
+      EmailTemplateId.GUARDIAN_ACTIVATED,
+      { fullName: guardian.user.fullName ?? undefined },
+      { entityType: 'guardian.guardians', entityId: guardianId, userId: guardian.userId },
+    );
 
     return {
       guardianId,
@@ -398,6 +447,13 @@ export class AdminGuardiansService {
       entityType: 'guardian.guardians',
       entityId: guardianId,
     });
+
+    await this.emails.sendToUser(
+      guardian.userId,
+      EmailTemplateId.GUARDIAN_SUSPENDED,
+      { fullName: guardian.user.fullName ?? undefined },
+      { entityType: 'guardian.guardians', entityId: guardianId, userId: guardian.userId },
+    );
 
     return { guardianId, status: GuardianStatus.SUSPENDED };
   }

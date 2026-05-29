@@ -480,7 +480,8 @@ export class AuthController {
 
   @ApiOperation({
 
-    summary: 'Request password reset OTP (sent to account phone)',
+    summary:
+      'Request password reset OTP (SMS to phone; email too when on file)',
 
   })
 

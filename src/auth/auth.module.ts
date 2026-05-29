@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { DocumentsModule } from '../documents/documents.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SmsModule } from '../sms/sms.module';
 import { AuthService } from './auth.service';
 import { RegisterOnboardingService } from './register-onboarding.service';
@@ -16,6 +17,7 @@ import { PermissionResolverService } from './permission-resolver.service';
 @Module({
   imports: [
     DocumentsModule,
+    NotificationsModule,
     SmsModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

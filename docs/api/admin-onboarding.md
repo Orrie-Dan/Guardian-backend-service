@@ -36,7 +36,7 @@ After **activate**, the guardian signs in (`/auth/sign-in/password` or OTP), may
 
 | Entity | Initial state |
 |--------|----------------|
-| `identity.users` | `status: PENDING_VERIFICATION`, no password |
+| `identity.users` | `status: PENDING_VERIFICATION`, temporary password hash stored, `passwordSetAt: null` |
 | `identity.user_roles` | `GUARDIAN` assigned by creating admin |
 | `guardian.guardians` | `status: INACTIVE`, `verificationStatus: PENDING`, auto `guardianCode` (`G-00001`, …) |
 | `guardian.guardian_shift_state` | `shiftStatus: OFF_DUTY`, `availableForJobs: false` |
@@ -44,7 +44,13 @@ After **activate**, the guardian signs in (`/auth/sign-in/password` or OTP), may
 
 Sensitive values are **never stored in plain text**: `nationalId` and optional `reserveForceNumber` are bcrypt-hashed server-side.
 
-The guardian **cannot** go on duty or receive dispatch offers until steps 4–6 complete and they sign in.
+The guardian **cannot** go **available** (on duty) or receive dispatch offers until steps 4–6 complete and they sign in. See [guardians.md](guardians.md).
+
+Credential dispatch at create time:
+
+- If `email` is present, credentials are sent by email first.
+- If email is missing or email delivery fails, SMS fallback is attempted to `phone`.
+- Guardians should sign in and immediately call `POST /auth/password/set` to replace the temporary password.
 
 ---
 
@@ -95,7 +101,7 @@ The guardian **cannot** go on duty or receive dispatch offers until steps 4–6 
 
 ### Response
 
-Returns the **guardian profile** (includes nested `user`, `shiftState`, optional `vettingRecord`). Save `id` (guardian UUID) for later steps.
+Returns the **guardian profile** (includes nested `user`, `shiftState`, optional `vettingRecord`) plus credential dispatch metadata (`credentialsDispatched`, `credentialsChannel`). Save `id` (guardian UUID) for later steps.
 
 ### Errors
 
@@ -202,13 +208,15 @@ Sets guardian `SUSPENDED`, forces shift `OFF_DUTY`, clears availability. Permiss
 
 ## Dispatch and shift eligibility
 
+Product ↔ API duty mapping (offline / available / busy): [guardians.md](guardians.md).
+
 A guardian receives job offers and can start a shift only when:
 
 | Rule | Field / check |
 |------|----------------|
 | Account active | `guardians.status = ACTIVE` |
 | Identity verified | `guardians.verification_status = VERIFIED` |
-| On duty | `shift_status = AVAILABLE` (after `POST /guardians/me/shift/start`) |
+| **Available** (on duty) | `shift_status = AVAILABLE` and `available_for_jobs = true` (after `POST /guardians/me/shift/start`) |
 | District | Job district in `district_base` or `coverage_districts` |
 | Certification | ≥1 cert `VERIFIED` and `expiry_date` not in the past |
 

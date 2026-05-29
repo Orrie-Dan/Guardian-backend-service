@@ -42,6 +42,8 @@ import { OtpService } from './otp.service';
 import { normalizePhone } from './phone.util';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 @Injectable()
 export class RegisterOnboardingService {
@@ -53,6 +55,7 @@ export class RegisterOnboardingService {
     private readonly passwords: PasswordService,
     private readonly documents: DocumentsService,
     private readonly auth: AuthService,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   startRegistration(phone: string) {
@@ -530,6 +533,24 @@ export class RegisterOnboardingService {
       entityId: ctx.userId,
       afterState: { orgId: ctx.organizationId },
     });
+
+    const orgRecord = await this.prisma.organization.findUnique({
+      where: { id: ctx.organizationId },
+      select: { legalName: true, tradingName: true },
+    });
+    await this.emails.sendToUser(
+      ctx.userId,
+      EmailTemplateId.ONBOARDING_APPLICATION_SUBMITTED,
+      {
+        organizationName:
+          orgRecord?.tradingName ?? orgRecord?.legalName ?? 'your organization',
+      },
+      {
+        entityType: 'customer.organizations',
+        entityId: ctx.organizationId,
+        userId: ctx.userId,
+      },
+    );
 
     return this.auth.issueFullAuthResponse(ctx.userId);
   }

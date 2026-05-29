@@ -7,6 +7,8 @@ import { PaymentProvider, PaymentStatus, Prisma } from '@prisma/client';
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 export interface CreatePaymentInput {
   invoiceId: string;
@@ -22,6 +24,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly locationSetup: PrimaryLocationSetupPolicy,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   async createPayment(input: CreatePaymentInput) {
@@ -106,6 +109,24 @@ export class PaymentsService {
       entityType: 'billing.payments',
       entityId: paymentId,
     });
+
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: payment.invoiceId },
+      include: { job: { select: { referenceNumber: true } } },
+    });
+    if (invoice) {
+      await this.emails.sendToOrgOwners(
+        invoice.organizationId,
+        EmailTemplateId.BILLING_PAYMENT_CONFIRMED,
+        {
+          jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
+          jobId: invoice.jobId,
+          amount: payment.amount.toString(),
+          currency: payment.currency,
+        },
+        { entityType: 'billing.payments', entityId: paymentId },
+      );
+    }
 
     return updated;
   }

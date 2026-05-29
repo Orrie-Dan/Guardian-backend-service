@@ -22,6 +22,8 @@ import {
   OFFER_TTL_MS,
 } from '../queue/queue.constants';
 import { BillingService } from '../billing/billing.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 type LockedGuardian = { id: string };
 
@@ -35,6 +37,7 @@ export class DispatchingService implements OnModuleInit {
     private readonly shiftState: ShiftStateService,
     private readonly outbox: OutboxService,
     private readonly billing: BillingService,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   onModuleInit(): void {
@@ -135,6 +138,20 @@ export class DispatchingService implements OnModuleInit {
         expiresAt: assignment.expiresAt,
       },
     });
+
+    const jobRecord = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      select: { referenceNumber: true },
+    });
+    await this.emails.sendToGuardianUser(
+      assignment.guardianId,
+      EmailTemplateId.DISPATCH_OFFER_RECEIVED,
+      {
+        jobReference: jobRecord?.referenceNumber ?? jobId,
+        jobId,
+      },
+      { entityType: 'job.job_assignments', entityId: assignment.id },
+    );
   }
 
   private async lockNextGuardian(
@@ -381,6 +398,13 @@ export class DispatchingService implements OnModuleInit {
     );
 
     await this.billing.createInvoiceForJob(job);
+
+    await this.emails.sendToOrgOwners(
+      job.organizationId,
+      EmailTemplateId.JOB_COMPLETED,
+      { jobReference: job.referenceNumber, jobId },
+      { entityType: 'job.jobs', entityId: jobId },
+    );
 
     return { jobId, status: JobStatus.COMPLETED };
   }

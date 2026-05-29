@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -27,6 +28,8 @@ import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminGuardiansService } from './admin-guardians.service';
+import { AdminUsersService } from './admin-users.service';
+import { BulkDeleteUsersDto } from './dto/bulk-delete-users.dto';
 import { AdminVerificationService } from './admin-verification.service';
 import { AdminCreateCertificationDto } from './dto/admin-create-certification.dto';
 import { CreateGuardianDto } from './dto/create-guardian.dto';
@@ -45,6 +48,7 @@ import { DocumentsService } from '../documents/documents.service';
 export class AdminController {
   constructor(
     private readonly guardians: AdminGuardiansService,
+    private readonly users: AdminUsersService,
     private readonly verification: AdminVerificationService,
     private readonly documents: DocumentsService,
     private readonly pricing: AdminPricingService,
@@ -53,6 +57,31 @@ export class AdminController {
     private readonly billing: BillingService,
     private readonly prisma: PrismaService,
   ) {}
+
+  @Get('users/:id/delete-preview')
+  @RequirePermissions('admin:users:delete')
+  previewUserDelete(@Param('id', ParseUUIDPipe) id: string) {
+    return this.users.previewDelete(id);
+  }
+
+  @Delete('users/:id')
+  @RequirePermissions('admin:users:delete')
+  deleteUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+    @Query('mode') mode?: 'soft' | 'hard',
+  ) {
+    return this.users.deleteUser(id, user, mode ?? 'soft');
+  }
+
+  @Post('users/bulk-delete')
+  @RequirePermissions('admin:users:delete')
+  bulkDeleteUsers(
+    @Body() dto: BulkDeleteUsersDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.users.bulkDeleteByEmail(dto.emails, user, dto.mode ?? 'soft');
+  }
 
   @Post('guardians')
   @RequirePermissions('admin:guardians:write')

@@ -17,10 +17,12 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | Doc | Contents |
 |-----|----------|
 | [client-integration.md](client-integration.md) | **Frontend/mobile:** which API for which screen, tokens, upload pattern |
+| [guardians.md](guardians.md) | **Guardian app:** duty status map (offline / available / busy), shift & heartbeat |
 | [onboarding.md](onboarding.md) | Client registration v2, complete site, error codes |
 | [admin-onboarding.md](admin-onboarding.md) | **Admin:** guardian create, vetting, verify, activate |
 | [admin-pricing.md](admin-pricing.md) | **Admin:** pricing rule setup, precedence, examples |
 | [auth.md](auth.md) | Sign-in, tokens |
+| [email-notifications.md](email-notifications.md) | Transactional email matrix and delivery semantics |
 | [admin.md](admin.md) | Admin route index, org/guardian/cert verification |
 | [changelog.md](changelog.md) | v1 breaking changes, route migrations, deprecations |
 
@@ -33,7 +35,7 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | `/organizations` | Orgs, members, locations | Bearer JWT |
 | `/jobs` | Jobs, dispatch, complete, invoice | Bearer JWT + roles |
 | `/assignments` | Accept/decline offers | Bearer JWT, `GUARDIAN` |
-| `/guardians` | Shift, heartbeat, me | Bearer JWT, `GUARDIAN` |
+| `/guardians` | Shift, heartbeat, me — see [guardians.md](guardians.md) | Bearer JWT, `GUARDIAN` |
 | `/admin` | Ops admin | Bearer JWT, `SUPER_ADMIN` or `OPS_ADMIN` |
 | `/payments` | Payments | Bearer JWT |
 | `/invoices` | Billing invoices | Bearer JWT |

@@ -16,6 +16,8 @@ import {
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 type JobWithLocation = Job & { location: Location };
 
@@ -25,6 +27,7 @@ export class BillingService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly policy: ResourceOwnerPolicy,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   async resolvePrice(
@@ -131,7 +134,10 @@ export class BillingService {
   }
 
   async issue(id: string, actor: AuthUserPayload) {
-    const invoice = await this.prisma.invoice.findUnique({ where: { id } });
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { job: { select: { referenceNumber: true } } },
+    });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
@@ -149,10 +155,28 @@ export class BillingService {
       entityType: 'billing.invoices',
       entityId: id,
     });
+    await this.emails.sendToOrgOwners(
+      invoice.organizationId,
+      EmailTemplateId.BILLING_INVOICE_ISSUED,
+      {
+        jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
+        jobId: invoice.jobId,
+        amount: invoice.total.toString(),
+        currency: invoice.currency,
+      },
+      { entityType: 'billing.invoices', entityId: id },
+    );
     return updated;
   }
 
   async voidInvoice(id: string, actor: AuthUserPayload) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { job: { select: { referenceNumber: true } } },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
     const updated = await this.prisma.invoice.update({
       where: { id },
       data: { status: InvoiceStatus.VOID },
@@ -163,6 +187,15 @@ export class BillingService {
       entityType: 'billing.invoices',
       entityId: id,
     });
+    await this.emails.sendToOrgOwners(
+      invoice.organizationId,
+      EmailTemplateId.BILLING_INVOICE_VOIDED,
+      {
+        jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
+        jobId: invoice.jobId,
+      },
+      { entityType: 'billing.invoices', entityId: id },
+    );
     return updated;
   }
 

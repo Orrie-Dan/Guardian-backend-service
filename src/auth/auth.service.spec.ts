@@ -5,11 +5,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { RoleCode, UserStatus } from '@prisma/client';
+import { GuardianStatus, RoleCode, UserStatus } from '@prisma/client';
 import { AuditService } from '../common/services/audit.service';
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { PrismaService } from '../prisma/prisma.service';
 import { loadAuthUserPayload } from './auth-user.loader';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { PasswordService } from './password.service';
@@ -41,8 +42,15 @@ describe('AuthService', () => {
       primaryLocationId: null,
     }),
   };
+  const emails = {
+    sendToUser: jest.fn().mockResolvedValue({ sent: true }),
+    sendToOrgOwners: jest.fn().mockResolvedValue([]),
+    sendToGuardianUser: jest.fn().mockResolvedValue({ sent: true }),
+    sendBestEffort: jest.fn().mockResolvedValue({ sent: true }),
+  };
   const prisma = {
     user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    guardian: { findUnique: jest.fn() },
     role: { findUnique: jest.fn() },
     organizationUser: { findMany: jest.fn() },
     $transaction: jest.fn(),
@@ -60,6 +68,7 @@ describe('AuthService', () => {
         { provide: AuditService, useValue: audit },
         { provide: PasswordService, useValue: passwords },
         { provide: PrimaryLocationSetupPolicy, useValue: locationSetup },
+        { provide: EmailNotificationService, useValue: emails },
       ],
     }).compile();
 
@@ -76,7 +85,7 @@ describe('AuthService', () => {
     expect(() => service.deprecatedOtpRequest()).toThrow(GoneException);
   });
 
-  it('passwordResetRequest sends OTP to user phone', async () => {
+  it('passwordResetRequest sends OTP with password_reset purpose', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'u1',
       phoneNumber: '+250788123456',
@@ -88,7 +97,13 @@ describe('AuthService', () => {
 
     await service.passwordResetRequest('+250788123456');
 
-    expect(otp.requestOtp).toHaveBeenCalledWith('+250788123456');
+    expect(otp.requestOtp).toHaveBeenCalledWith(
+      '+250788123456',
+      undefined,
+      undefined,
+      { purpose: 'password_reset' },
+    );
+    expect(emails.sendToUser).not.toHaveBeenCalled();
   });
 
   it('passwordResetRequest rejects account without password', async () => {
@@ -276,5 +291,53 @@ describe('AuthService', () => {
         where: { email: 'ops@company.rw' },
       }),
     );
+  });
+
+  it('signInWithPassword returns setup token when password was never finalized', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      passwordHash: 'hash',
+      passwordSetAt: null,
+      status: UserStatus.ACTIVE,
+      isPhoneVerified: true,
+      onboardingCompletedAt: new Date(),
+      userRoles: [{ role: { code: RoleCode.GUARDIAN } }],
+    });
+    passwords.verify.mockResolvedValue(true);
+    prisma.user.update.mockResolvedValue({});
+    prisma.organizationUser.findMany.mockResolvedValue([]);
+    (loadAuthUserPayload as jest.Mock).mockResolvedValue({
+      sub: 'u1',
+      roles: ['GUARDIAN'],
+      activeRole: 'GUARDIAN',
+      organizationIds: [],
+      guardianId: 'g1',
+    });
+    tokens.issueSetupToken.mockResolvedValue('setup-token');
+    prisma.guardian.findUnique.mockResolvedValue({ id: 'g1', status: GuardianStatus.ACTIVE });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'u1',
+        passwordHash: 'hash',
+        passwordSetAt: null,
+        status: UserStatus.ACTIVE,
+        isPhoneVerified: true,
+        onboardingCompletedAt: new Date(),
+        userRoles: [{ role: { code: RoleCode.GUARDIAN } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'u1',
+        phoneNumber: '+250788123456',
+        fullName: 'Guardian One',
+        passwordSetAt: null,
+      });
+
+    const result = await service.signInWithPassword('+250788123456', 'password');
+
+    expect(result).toMatchObject({
+      requiresPasswordSetup: true,
+      setupToken: 'setup-token',
+    });
+    expect(tokens.issueTokens).not.toHaveBeenCalled();
   });
 });

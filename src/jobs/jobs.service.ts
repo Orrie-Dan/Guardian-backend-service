@@ -21,6 +21,8 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { CreateJobDto } from './dto/create-job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
 import { JobReferenceService } from './job-reference.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 
 @Injectable()
 export class JobsService {
@@ -33,6 +35,7 @@ export class JobsService {
     private readonly locationSetup: PrimaryLocationSetupPolicy,
     private readonly audit: AuditService,
     private readonly dispatching: DispatchingService,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   async create(dto: CreateJobDto, actor: AuthUserPayload, autoDispatch = true) {
@@ -98,6 +101,13 @@ export class JobsService {
       entityType: 'job.jobs',
       entityId: job.id,
     });
+
+    await this.emails.sendToOrgOwners(
+      dto.organizationId,
+      EmailTemplateId.JOB_CREATED,
+      { jobReference: job.referenceNumber, jobId: job.id },
+      { entityType: 'job.jobs', entityId: job.id },
+    );
 
     return job;
   }
@@ -202,6 +212,17 @@ export class JobsService {
       entityId: id,
       afterState: { reason },
     });
+
+    await this.emails.sendToOrgOwners(
+      job.organizationId,
+      EmailTemplateId.JOB_CANCELLED,
+      {
+        jobReference: job.referenceNumber,
+        jobId: id,
+        reason: reason ?? undefined,
+      },
+      { entityType: 'job.jobs', entityId: id },
+    );
 
     return { id, status: JobStatus.CANCELLED };
   }

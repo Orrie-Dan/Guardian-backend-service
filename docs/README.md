@@ -23,6 +23,7 @@ Index for G2 Sentry Guardian. Start at the [project README](../README.md) for qu
 |----------|-------------|
 | [api/README.md](api/README.md) | API overview; use Swagger for schemas |
 | [api/client-integration.md](api/client-integration.md) | **Apps:** screen → endpoint map (client, guardian, admin) |
+| [api/guardians.md](api/guardians.md) | Guardian duty status: offline / available / busy |
 | [api/onboarding.md](api/onboarding.md) | Client registration v2, complete site |
 | [api/admin-onboarding.md](api/admin-onboarding.md) | Guardian create/activate (admin) |
 | [api/auth.md](api/auth.md) | Sign-in, tokens, error codes |

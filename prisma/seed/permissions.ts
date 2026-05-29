@@ -74,6 +74,7 @@ export const OPS_ADMIN_PERMISSIONS: readonly string[] = [
   'admin:guardians:write',
   'admin:guardians:activate',
   'admin:guardians:suspend',
+  'admin:users:delete',
   'admin:verification:read',
   'admin:verification:write',
   'admin:pricing:read',

@@ -7,9 +7,12 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
+import { EmailTemplateId } from '../notifications/email-template.ids';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PindoSmsService } from '../sms/pindo-sms.service';
 import { normalizePhone } from './phone.util';
+import { OtpPurpose, OtpRequestOptions } from './otp.types';
 
 const OTP_TTL_MS = 5 * 60_000;
 const OTP_COOLDOWN_MS = 60_000;
@@ -23,12 +26,14 @@ export class OtpService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pindoSms: PindoSmsService,
+    private readonly emails: EmailNotificationService,
   ) {}
 
   async requestOtp(
     phone: string,
     ipAddress?: string,
     deviceFingerprint?: string,
+    options?: OtpRequestOptions,
   ) {
     const normalized = this.normalizePhone(phone);
     const recent = await this.prisma.otpSession.findFirst({
@@ -60,7 +65,8 @@ export class OtpService {
       },
     });
 
-    await this.deliverOtp(normalized, code);
+    const purpose = options?.purpose ?? 'general';
+    await this.deliverOtp(normalized, code, purpose);
 
     return {
       otpId: otp.id,
@@ -105,7 +111,18 @@ export class OtpService {
     return normalized;
   }
 
-  private async deliverOtp(phone: string, code: string): Promise<void> {
+  private async deliverOtp(
+    phone: string,
+    code: string,
+    purpose: OtpPurpose,
+  ): Promise<void> {
+    await Promise.all([
+      this.deliverOtpSms(phone, code),
+      this.deliverOtpEmail(phone, code, purpose),
+    ]);
+  }
+
+  private async deliverOtpSms(phone: string, code: string): Promise<void> {
     if (!this.pindoSms.isConfigured()) {
       if (process.env.NODE_ENV === 'production') {
         throw new HttpException(
@@ -124,6 +141,40 @@ export class OtpService {
       }
       this.logger.warn(
         `Pindo SMS failed in ${process.env.NODE_ENV ?? 'development'}; use devCode from API response`,
+      );
+    }
+  }
+
+  private async deliverOtpEmail(
+    phone: string,
+    code: string,
+    purpose: OtpPurpose,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { phoneNumber: phone },
+      select: { id: true, email: true, fullName: true },
+    });
+
+    if (!user?.email?.trim()) {
+      return;
+    }
+
+    const result = await this.emails.sendBestEffort(
+      user.email,
+      EmailTemplateId.SECURITY_OTP_CODE,
+      {
+        fullName: user.fullName ?? undefined,
+        otpCode: code,
+        purpose,
+      },
+      { entityType: 'identity.users', entityId: user.id, userId: user.id },
+    );
+
+    if (result.sent) {
+      this.logger.log(`OTP email sent to user=${user.id} purpose=${purpose}`);
+    } else if (!result.skipped) {
+      this.logger.warn(
+        `OTP email not delivered for user=${user.id} purpose=${purpose} reason=${result.reason ?? 'unknown'}`,
       );
     }
   }

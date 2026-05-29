@@ -7,9 +7,17 @@ import {
   CertificationVerificationStatus,
   GuardianVerificationStatus,
   OrgMemberRole,
+  Prisma,
   VerificationStatus,
 } from '@prisma/client';
+import {
+  PaginationQueryDto,
+  buildPaginatedMeta,
+  paginationSkipTake,
+} from '../common/dto/pagination-query.dto';
 import { AuditService } from '../common/services/audit.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { EmailTemplateId } from '../notifications/email-template.ids';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -25,7 +33,63 @@ export class AdminVerificationService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly emails: EmailNotificationService,
   ) {}
+
+  async listOrganizations(
+    query: PaginationQueryDto,
+    filters?: { status?: VerificationStatus; search?: string },
+  ) {
+    const trimmedSearch = filters?.search?.trim();
+    const where: Prisma.OrganizationWhereInput = {
+      ...(filters?.status ? { verificationStatus: filters.status } : {}),
+      ...(trimmedSearch
+        ? {
+            OR: [
+              { legalName: { contains: trimmedSearch, mode: 'insensitive' } },
+              { tradingName: { contains: trimmedSearch, mode: 'insensitive' } },
+              { tinNumber: { contains: trimmedSearch, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.organization.findMany({
+        where,
+        ...paginationSkipTake(query),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          verificationDocuments: {
+            include: {
+              document: { select: DOCUMENT_METADATA_SELECT },
+            },
+          },
+          users: {
+            include: {
+              user: { select: { phoneNumber: true, fullName: true, email: true } },
+            },
+          },
+          locations: true,
+        },
+      }),
+      this.prisma.organization.count({ where }),
+    ]);
+
+    const items = rows.map((org) => ({
+      ...org,
+      locations: org.locations.map(mapLocation),
+      verificationDocuments: org.verificationDocuments.map((row) => ({
+        ...row,
+        document: mapDocumentMetadata(row.document),
+      })),
+    }));
+
+    return {
+      items,
+      meta: buildPaginatedMeta(query.page, query.limit, total),
+    };
+  }
 
   async listPendingOrganizations() {
     const rows = await this.prisma.organization.findMany({
@@ -77,7 +141,11 @@ export class AdminVerificationService {
           status === VerificationStatus.REJECTED ? reason?.trim() : null,
       },
       include: {
-        users: { include: { user: { select: { id: true } } } },
+        users: {
+          include: {
+            user: { select: { id: true, email: true, fullName: true } },
+          },
+        },
       },
     });
 
@@ -93,6 +161,8 @@ export class AdminVerificationService {
       .filter((u) => u.role === OrgMemberRole.CLIENT_OWNER)
       .map((u) => u.user.id);
 
+    const orgName = org.tradingName ?? org.legalName ?? 'your organization';
+
     if (status === VerificationStatus.VERIFIED) {
       for (const userId of ownerIds) {
         await this.notifications.createInApp(
@@ -102,6 +172,12 @@ export class AdminVerificationService {
           { organizationId: id, action: 'COMPLETE_SITE_SETUP' },
         );
       }
+      await this.emails.sendToOrgOwners(
+        id,
+        EmailTemplateId.VERIFICATION_ORG_APPROVED,
+        { organizationName: orgName },
+        { entityType: 'customer.organizations', entityId: id },
+      );
     } else if (status === VerificationStatus.REJECTED) {
       for (const userId of ownerIds) {
         await this.notifications.createInApp(
@@ -111,6 +187,12 @@ export class AdminVerificationService {
           { organizationId: id, action: 'VIEW_REJECTION' },
         );
       }
+      await this.emails.sendToOrgOwners(
+        id,
+        EmailTemplateId.VERIFICATION_ORG_REJECTED,
+        { organizationName: orgName, reason: reason ?? 'Not approved' },
+        { entityType: 'customer.organizations', entityId: id },
+      );
     }
 
     return org;

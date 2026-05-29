@@ -7,6 +7,7 @@ import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminController } from './admin.controller';
 import { AdminGuardiansService } from './admin-guardians.service';
+import { AdminUsersService } from './admin-users.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminVerificationService } from './admin-verification.service';
 
@@ -15,6 +16,7 @@ import { AdminVerificationService } from './admin-verification.service';
   controllers: [AdminController],
   providers: [
     AdminGuardiansService,
+    AdminUsersService,
     AdminVerificationService,
     AdminPricingService,
     AdminAuditService,

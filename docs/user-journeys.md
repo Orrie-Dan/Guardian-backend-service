@@ -117,7 +117,7 @@ sequenceDiagram
 4. **Verify cert** — `PATCH /admin/verification/certifications/:id` → `VERIFIED`
 5. **Verify guardian** — `PATCH /admin/verification/guardians/:id` → `VERIFIED`
 6. **Activate** — `POST /admin/guardians/:id/activate` (sends OTP; guardian sets password if needed)
-7. **Go on duty** — `POST /guardians/me/shift/start` (eligibility checks apply)
+7. **Go available (on duty)** — `POST /guardians/me/shift/start` (eligibility checks apply) — see [api/guardians.md](api/guardians.md)
 
 Suspend: `POST /admin/guardians/:id/suspend`.
 
@@ -125,11 +125,13 @@ Request bodies, initial DB state, and enums: [api/admin-onboarding.md](api/admin
 
 ### Dispatch eligibility
 
+Duty labels and endpoints: [api/guardians.md](api/guardians.md).
+
 A guardian is offered jobs only when:
 
 - `status = ACTIVE`
 - `verification_status = VERIFIED`
-- On duty (`shift_status = AVAILABLE`)
+- **Available** on duty (`shift_status = AVAILABLE`, `available_for_jobs = true`)
 - Job district matches `district_base` or `coverage_districts`
 - At least one certification: `VERIFIED` and not past `expiry_date`
 
@@ -164,7 +166,7 @@ sequenceDiagram
 | Invoice | Client | `GET /jobs/:id/invoice` |
 | Pay | Client (verified org) | `POST /payments` |
 
-Guardian shift and location: `POST /guardians/me/shift/start`, `.../end`, `POST /guardians/me/heartbeat`.
+Guardian duty and location: see [api/guardians.md](api/guardians.md) — `POST /guardians/me/shift/start` (available), `.../shift/end` (offline), `POST /guardians/me/heartbeat` (connectivity only).
 
 Legacy route names: [api/changelog.md](api/changelog.md).
 
