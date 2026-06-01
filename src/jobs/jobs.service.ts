@@ -11,10 +11,16 @@ import {
   buildPaginatedMeta,
   paginationSkipTake,
 } from '../common/dto/pagination-query.dto';
+import {
+  estimateEtaMinutes,
+  haversineDistanceMeters,
+  parseCoordinate,
+} from '../common/geo.util';
 import { OrganizationVerificationPolicy } from '../common/policies/organization-verification.policy';
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { DispatchingService } from '../dispatching/dispatching.service';
+import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
@@ -23,6 +29,15 @@ import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
 import { JobReferenceService } from './job-reference.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import {
+  JobTrackingResponse,
+  TRACKABLE_ASSIGNMENT_STATUSES,
+} from './job-tracking.types';
+
+const jobWithLocationAndOrganization = {
+  location: true,
+  organization: true,
+} as const;
 
 @Injectable()
 export class JobsService {
@@ -36,6 +51,7 @@ export class JobsService {
     private readonly audit: AuditService,
     private readonly dispatching: DispatchingService,
     private readonly emails: EmailNotificationService,
+    private readonly guardianLocation: GuardianLocationService,
   ) {}
 
   async create(dto: CreateJobDto, actor: AuthUserPayload, autoDispatch = true) {
@@ -141,7 +157,7 @@ export class JobsService {
         skip,
         take,
         orderBy: { createdAt: query.order },
-        include: { location: true },
+        include: jobWithLocationAndOrganization,
       }),
       this.prisma.job.count({ where }),
     ]);
@@ -157,7 +173,7 @@ export class JobsService {
     return this.prisma.job.findUnique({
       where: { id: job.id },
       include: {
-        location: true,
+        ...jobWithLocationAndOrganization,
         assignments: {
           include: { guardian: { include: { user: true } } },
           orderBy: { offerSentAt: 'desc' },
@@ -173,6 +189,96 @@ export class JobsService {
       where: { jobId: id },
       orderBy: { changedAt: 'desc' },
     });
+  }
+
+  async getTracking(jobId: string, actor: AuthUserPayload): Promise<JobTrackingResponse> {
+    await this.policy.assertJobAccess(jobId, actor);
+
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      include: {
+        location: true,
+        assignments: {
+          where: { status: { in: TRACKABLE_ASSIGNMENT_STATUSES } },
+          orderBy: { acceptedAt: 'desc' },
+          take: 1,
+          include: {
+            guardian: {
+              include: {
+                user: {
+                  select: {
+                    fullName: true,
+                    phoneNumber: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const assignment = job.assignments[0];
+    if (!assignment) {
+      throw new BadRequestException(
+        'Live tracking is only available after a guardian accepts the job',
+      );
+    }
+
+    const location = await this.guardianLocation.getCurrent(assignment.guardianId);
+
+    const destLat = job.location.latitude.toString();
+    const destLng = job.location.longitude.toString();
+    const guardianLat = parseCoordinate(location.latitude);
+    const guardianLng = parseCoordinate(location.longitude);
+    const siteLat = parseCoordinate(destLat);
+    const siteLng = parseCoordinate(destLng);
+
+    let distanceMeters: number | null = null;
+    let etaMinutes: number | null = null;
+    if (
+      guardianLat != null &&
+      guardianLng != null &&
+      siteLat != null &&
+      siteLng != null
+    ) {
+      distanceMeters = Math.round(
+        haversineDistanceMeters(guardianLat, guardianLng, siteLat, siteLng),
+      );
+      etaMinutes = estimateEtaMinutes(distanceMeters, location.speed);
+    }
+
+    const user = assignment.guardian.user;
+    const displayName = user.fullName?.trim() || user.phoneNumber || null;
+
+    return {
+      jobId: job.id,
+      jobStatus: job.status,
+      assignment: {
+        id: assignment.id,
+        status: assignment.status,
+        acceptedAt: assignment.acceptedAt?.toISOString() ?? null,
+        arrivedAt: assignment.arrivedAt?.toISOString() ?? null,
+      },
+      guardian: {
+        id: assignment.guardianId,
+        displayName,
+      },
+      location,
+      destination: {
+        locationId: job.location.id,
+        name: job.location.name,
+        address: job.location.address,
+        latitude: destLat,
+        longitude: destLng,
+      },
+      distanceMeters,
+      etaMinutes,
+    };
   }
 
   async cancel(id: string, actor: AuthUserPayload, reason?: string) {
