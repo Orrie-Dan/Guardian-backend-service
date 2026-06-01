@@ -27,6 +27,7 @@ import { BillingService } from '../billing/billing.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminPricingService } from './admin-pricing.service';
+import { AdminMapService } from './admin-map.service';
 import { AdminGuardiansService } from './admin-guardians.service';
 import { AdminUsersService } from './admin-users.service';
 import { BulkDeleteUsersDto } from './dto/bulk-delete-users.dto';
@@ -35,10 +36,15 @@ import { AdminCreateCertificationDto } from './dto/admin-create-certification.dt
 import { CreateGuardianDto } from './dto/create-guardian.dto';
 import { CreateVettingDto } from './dto/create-vetting.dto';
 import { ListGuardiansQueryDto } from './dto/list-guardians-query.dto';
+import { ListVerificationCertificationsQueryDto } from './dto/list-verification-certifications-query.dto';
 import { ReviewVerificationDto } from './dto/review-verification.dto';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
+import { MapGuardiansQueryDto } from './dto/map-guardians-query.dto';
+import { MapSitesQueryDto } from './dto/map-sites-query.dto';
 import { UpdateGuardianDto } from './dto/update-guardian.dto';
+import { LocationHistoryQueryDto } from '../guardians/dto/location-history-query.dto';
+import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
 
@@ -47,7 +53,9 @@ import { DocumentsService } from '../documents/documents.service';
 @Controller('admin')
 export class AdminController {
   constructor(
+    private readonly map: AdminMapService,
     private readonly guardians: AdminGuardiansService,
+    private readonly guardianLocation: GuardianLocationService,
     private readonly users: AdminUsersService,
     private readonly verification: AdminVerificationService,
     private readonly documents: DocumentsService,
@@ -83,6 +91,18 @@ export class AdminController {
     return this.users.bulkDeleteByEmail(dto.emails, user, dto.mode ?? 'soft');
   }
 
+  @Get('map/guardians')
+  @RequirePermissions('admin:guardians:read')
+  mapGuardians(@Query() query: MapGuardiansQueryDto) {
+    return this.map.listGuardianMarkers(query);
+  }
+
+  @Get('map/sites')
+  @RequirePermissions('organizations:read')
+  mapSites(@Query() query: MapSitesQueryDto) {
+    return this.map.listSiteMarkers(query);
+  }
+
   @Post('guardians')
   @RequirePermissions('admin:guardians:write')
   createGuardian(
@@ -102,6 +122,28 @@ export class AdminController {
   @RequirePermissions('admin:guardians:read')
   getGuardian(@Param('id', ParseUUIDPipe) id: string) {
     return this.guardians.getOne(id);
+  }
+
+  @Get('guardians/:id/certifications')
+  @RequirePermissions('admin:guardians:read')
+  listGuardianCertifications(@Param('id', ParseUUIDPipe) id: string) {
+    return this.guardians.listCertificationsForGuardian(id);
+  }
+
+  @Get('guardians/:id/location/history')
+  @RequirePermissions('admin:guardians:read')
+  getGuardianLocationHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: LocationHistoryQueryDto,
+  ) {
+    const since = query.since ? new Date(query.since) : undefined;
+    return this.guardianLocation.getHistory(id, query, since);
+  }
+
+  @Get('guardians/:id/location')
+  @RequirePermissions('admin:guardians:read')
+  getGuardianLocation(@Param('id', ParseUUIDPipe) id: string) {
+    return this.guardianLocation.getCurrent(id);
   }
 
   @Patch('guardians/:id')
@@ -132,6 +174,12 @@ export class AdminController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.guardians.addCertification(id, dto, user);
+  }
+
+  @Get('certifications/:id')
+  @RequirePermissions('admin:guardians:read')
+  getCertification(@Param('id', ParseUUIDPipe) id: string) {
+    return this.guardians.getCertificationById(id);
   }
 
   @Post('guardians/:id/activate')
@@ -202,6 +250,14 @@ export class AdminController {
   @RequirePermissions('admin:verification:read')
   listPendingGuardians() {
     return this.verification.listPendingGuardians();
+  }
+
+  @Get('verification/certifications')
+  @RequirePermissions('admin:verification:read')
+  listVerificationCertifications(
+    @Query() query: ListVerificationCertificationsQueryDto,
+  ) {
+    return this.verification.listCertifications(query);
   }
 
   @Patch('verification/guardians/:id')

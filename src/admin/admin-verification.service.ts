@@ -21,11 +21,16 @@ import { EmailTemplateId } from '../notifications/email-template.ids';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  CERTIFICATION_WITH_DOCUMENT_INCLUDE,
+  mapCertificationForResponse,
+} from '../common/certification-response.util';
+import {
   DOCUMENT_METADATA_SELECT,
   mapDocumentMetadata,
   mapGuardianForAdmin,
   mapLocation,
 } from './admin-response.util';
+import { ListVerificationCertificationsQueryDto } from './dto/list-verification-certifications-query.dto';
 
 @Injectable()
 export class AdminVerificationService {
@@ -224,12 +229,57 @@ export class AdminVerificationService {
       const mapped = mapGuardianForAdmin(guardian);
       return {
         ...mapped,
-        certifications: guardian.certifications.map((cert) => ({
-          ...cert,
-          document: cert.document ? mapDocumentMetadata(cert.document) : null,
-        })),
+        certifications: guardian.certifications.map(mapCertificationForResponse),
       };
     });
+  }
+
+  async listCertifications(query: ListVerificationCertificationsQueryDto) {
+    const { skip, take } = paginationSkipTake(query);
+    const verificationStatus =
+      query.verificationStatus ?? CertificationVerificationStatus.PENDING;
+
+    const where = { verificationStatus };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.certification.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: 'asc' },
+        include: {
+          ...CERTIFICATION_WITH_DOCUMENT_INCLUDE,
+          guardian: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  phoneNumber: true,
+                  fullName: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.certification.count({ where }),
+    ]);
+
+    const items = rows.map((row) => {
+      const { guardian, ...cert } = row;
+      return {
+        ...mapCertificationForResponse(cert),
+        guardian: {
+          ...mapGuardianForAdmin(guardian),
+          user: guardian.user,
+        },
+      };
+    });
+
+    return {
+      items,
+      meta: buildPaginatedMeta(query.page, query.limit, total),
+    };
   }
 
   async reviewGuardian(

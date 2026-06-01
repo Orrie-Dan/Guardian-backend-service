@@ -28,10 +28,10 @@ import { CredentialDeliveryService } from '../notifications/credential-delivery.
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
 import {
-  DOCUMENT_METADATA_SELECT,
-  mapDocumentMetadata,
-  mapGuardianForAdmin,
-} from './admin-response.util';
+  CERTIFICATION_WITH_DOCUMENT_INCLUDE,
+  mapCertificationForResponse,
+} from '../common/certification-response.util';
+import { DOCUMENT_METADATA_SELECT, mapDocumentMetadata, mapGuardianForAdmin } from './admin-response.util';
 import { AdminCreateCertificationDto } from './dto/admin-create-certification.dto';
 import { CreateGuardianDto } from './dto/create-guardian.dto';
 import { CreateVettingDto } from './dto/create-vetting.dto';
@@ -232,10 +232,7 @@ export class AdminGuardiansService {
       ...mapGuardianForAdmin(guardian),
       user: guardian.user,
       shiftState: guardian.shiftState,
-      certifications: guardian.certifications.map((cert) => ({
-        ...cert,
-        document: cert.document ? mapDocumentMetadata(cert.document) : null,
-      })),
+      certifications: guardian.certifications.map(mapCertificationForResponse),
       vettingRecord: guardian.vettingRecord
         ? {
             ...guardian.vettingRecord,
@@ -332,6 +329,35 @@ export class AdminGuardiansService {
     });
 
     return record;
+  }
+
+  async listCertificationsForGuardian(guardianId: string) {
+    const guardian = await this.prisma.guardian.findUnique({
+      where: { id: guardianId },
+      select: { id: true },
+    });
+    if (!guardian) {
+      throw new NotFoundException('Guardian not found');
+    }
+
+    const rows = await this.prisma.certification.findMany({
+      where: { guardianId },
+      include: CERTIFICATION_WITH_DOCUMENT_INCLUDE,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map(mapCertificationForResponse);
+  }
+
+  async getCertificationById(certificationId: string) {
+    const cert = await this.prisma.certification.findUnique({
+      where: { id: certificationId },
+      include: CERTIFICATION_WITH_DOCUMENT_INCLUDE,
+    });
+    if (!cert) {
+      throw new NotFoundException('Certification not found');
+    }
+    return mapCertificationForResponse(cert);
   }
 
   async addCertification(
