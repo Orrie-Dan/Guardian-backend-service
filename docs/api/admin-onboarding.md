@@ -24,7 +24,7 @@ Narrative overview: [../user-journeys.md](../user-journeys.md) §3. Route index:
 | 6 | POST | `/admin/guardians/:id/activate` | `admin:guardians:activate` |
 | — | POST | `/admin/guardians/:id/suspend` | `admin:guardians:suspend` |
 
-Optional: `GET /admin/guardians`, `GET /admin/guardians/:id`, `PATCH /admin/guardians/:id`, `GET /admin/verification/guardians` for queues and edits.
+Optional: `GET /admin/guardians`, `GET /admin/guardians/:id`, `GET /admin/guardians/:id/certifications`, `GET /admin/certifications/:id`, `PATCH /admin/guardians/:id`, `GET /admin/verification/guardians`, `GET /admin/verification/certifications` for queues and edits.
 
 After **activate**, the guardian signs in (`/auth/sign-in/password` or OTP), may set a password (`POST /auth/password/set`), then `POST /guardians/me/shift/start` when eligibility passes.
 

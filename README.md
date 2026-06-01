@@ -47,6 +47,9 @@ Admin routes (`/admin/*`) require `SUPER_ADMIN` or `OPS_ADMIN`. Those roles are 
 | [docs/architecture.md](docs/architecture.md) | Modules, schemas, auth, request pipeline |
 | [docs/operations.md](docs/operations.md) | Deploy, secrets, production migration |
 | [docs/api/README.md](docs/api/README.md) | API overview (schemas live in Swagger) |
+| [docs/api/jobs.md](docs/api/jobs.md) | Jobs API reference (incl. `GET /jobs/:id/tracking`) |
+| [docs/api/mobile-job-dispatch-and-tracking.md](docs/api/mobile-job-dispatch-and-tracking.md) | Mobile: dispatch, accept, live map/ETA |
+| [docs/api/job-dispatch-frontend.md](docs/api/job-dispatch-frontend.md) | Job dispatch & tracking integration |
 | [docs/api/client-integration.md](docs/api/client-integration.md) | Client/mobile: screen → endpoint map |
 | [docs/api/onboarding.md](docs/api/onboarding.md) | Client registration v2, complete site |
 | [docs/api/admin-onboarding.md](docs/api/admin-onboarding.md) | Admin guardian create, vetting, activate |

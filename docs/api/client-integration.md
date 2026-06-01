@@ -131,11 +131,12 @@ Full step table: [onboarding.md](onboarding.md).
 
 | Screen / goal | Endpoints | Notes |
 |---------------|-----------|-------|
-| List jobs | `GET /jobs` | Query params in Swagger |
-| Job detail | `GET /jobs/:id` | |
+| List jobs | `GET /jobs` | Includes nested `location` and `organization`; query params in Swagger |
+| Job detail | `GET /jobs/:id` | Includes `location`, `organization`, `assignments`, `statusHistory` |
+| Live map / ETA | `GET /jobs/:id/tracking` | After guardian accept; poll ~10–15s — [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md) §3.3 |
 | Timeline | `GET /jobs/:id/timeline` | |
-| Create job | `POST /jobs` | Requires `canBookJobs`; see errors below |
-| Dispatch | `POST /jobs/:id/dispatch` | Finds eligible on-duty guardians |
+| Create job | `POST /jobs` | Requires `canBookJobs`; auto-queues dispatch — see [job-dispatch-frontend.md](job-dispatch-frontend.md) |
+| Dispatch | `POST /jobs/:id/dispatch` | Optional retry / `DISPATCHING` status; finds eligible on-duty guardians |
 | Cancel | `PATCH /jobs/:id/cancel` | |
 | Mark complete (client) | `POST /jobs/:id/complete` | |
 | Incidents | `GET/POST /jobs/:id/incidents` | |
@@ -178,7 +179,7 @@ Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [
 |---------------|---------------|-----------|-------|
 | Bootstrap | — | `GET /users/me` | `guardianId`, roles |
 | Guardian profile | — | `GET /guardians/me`, `PATCH /guardians/me` | `GET /guardians/me` includes `shiftState` for current duty |
-| Certifications | — | `GET /guardians/me/certifications` | |
+| Certifications | — | `GET /guardians/me/certifications`, `GET /guardians/me/certifications/:certificationId` | Includes linked document metadata when present |
 | **Available** (on duty) | `AVAILABLE` | `POST /guardians/me/shift/start` | Eligibility checks (verified, certs, etc.) |
 | **Offline** (off duty) | `OFF_DUTY` | `POST /guardians/me/shift/end` | |
 | **Busy** (on assignment) | `BUSY` | — | Set by server; read via `GET /guardians/me` |
@@ -188,7 +189,7 @@ Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [
 
 | Screen / goal | Endpoints | Notes |
 |---------------|-----------|-------|
-| Offers & active job | `GET /assignments/me` | Poll while on duty; offers expire (`DISPATCH_OFFER_TTL_MS`, default 90s) |
+| Offers & active job | `GET /assignments/me` | Poll while on duty; offers expire (`DISPATCH_OFFER_TTL_MS`, default 90s) — full flow: [job-dispatch-frontend.md](job-dispatch-frontend.md) |
 | Accept / decline offer | `POST /assignments/:id/accept`, `.../decline` | `:id` is assignment id |
 | En route | `POST /assignments/:id/en-route` | |
 | On site | `POST /assignments/:id/on-site` | |
@@ -213,12 +214,17 @@ For guardian onboarding and verification. Requires `SUPER_ADMIN` or `OPS_ADMIN` 
 | Sign in | `POST /auth/sign-in/password` with `login` = work email or phone | User must have admin role in DB |
 | Session | `GET /users/me` | Confirm `roles` includes `OPS_ADMIN` or `SUPER_ADMIN` |
 | Guardian list | `GET /admin/guardians` | Query filters: `status`, `verificationStatus` |
+| **Ops map — guardians (live)** | `GET /admin/map/guardians` | Poll ~15s; filters: `connectedOnly`, `onDutyOnly`, `withLocationOnly` |
+| **Ops map — client sites** | `GET /admin/map/sites` | Static org pins; filter `coordinatePrecision=USER_PINNED` for map-accurate sites |
 | Create guardian | `POST /admin/guardians` | Phone, name, national ID, `districtBase`, optional vetting inline |
 | Guardian detail | `GET /admin/guardians/:id` | Certs, vetting, user phone |
 | Edit profile | `PATCH /admin/guardians/:id` | Partial update |
 | Record RNP vetting | `POST /admin/guardians/:id/vetting` | Upsert |
+| List guardian certs | `GET /admin/guardians/:id/certifications` | Document metadata when linked |
+| Certification detail | `GET /admin/certifications/:id` | |
 | Add certification | `POST /admin/guardians/:id/certifications` | Starts `PENDING` |
 | Pending guardians queue | `GET /admin/verification/guardians` | |
+| Pending certs queue | `GET /admin/verification/certifications` | Query `verificationStatus` (default `PENDING`), `page`, `limit` |
 | Approve / reject guardian | `PATCH /admin/verification/guardians/:id` | `{ "status": "VERIFIED" }` before activate |
 | Approve / reject cert | `PATCH /admin/verification/certifications/:id` | Need ≥1 verified non-expired cert for duty |
 | Activate account | `POST /admin/guardians/:id/activate` | OTP to guardian; `devCode` in dev response |
@@ -301,6 +307,9 @@ More: [getting-started.md](../getting-started.md).
 | Doc | Use for |
 |-----|---------|
 | [README.md](README.md) | Controller index |
+| [jobs.md](jobs.md) | Jobs API reference (statuses, tracking contract) |
+| [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md) | **Mobile handoff:** dispatch, accept, live map/ETA |
+| [job-dispatch-frontend.md](job-dispatch-frontend.md) | Job booking, dispatch, guardian offers (polling & status mapping) |
 | [onboarding.md](onboarding.md) | Client registration + complete site |
 | [admin-onboarding.md](admin-onboarding.md) | Admin guardian create/activate |
 | [auth.md](auth.md) | Sign-in, tokens, errors |

@@ -22,6 +22,9 @@ Index for G2 Sentry Guardian. Start at the [project README](../README.md) for qu
 | Document | Description |
 |----------|-------------|
 | [api/README.md](api/README.md) | API overview; use Swagger for schemas |
+| [api/jobs.md](api/jobs.md) | Jobs module: endpoints, statuses, live tracking |
+| [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md) | **Mobile:** dispatch, accept, live map/ETA (handoff doc) |
+| [api/job-dispatch-frontend.md](api/job-dispatch-frontend.md) | Job booking, dispatch, polling, tracking API details |
 | [api/client-integration.md](api/client-integration.md) | **Apps:** screen → endpoint map (client, guardian, admin) |
 | [api/guardians.md](api/guardians.md) | Guardian duty status: offline / available / busy |
 | [api/onboarding.md](api/onboarding.md) | Client registration v2, complete site |

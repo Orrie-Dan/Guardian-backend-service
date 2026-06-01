@@ -78,7 +78,7 @@ Registered in [`src/app.module.ts`](../src/app.module.ts).
 | `AuthModule` | Register, sign-in, tokens, OTP | `/auth` |
 | `UsersModule` | Profile (`/users/me`) | `/users` |
 | `OrganizationsModule` | Orgs, members, locations | `/organizations` |
-| `JobsModule` | Job CRUD, dispatch, complete, incidents | `/jobs` |
+| `JobsModule` | Job CRUD, dispatch, complete, incidents, client live tracking (`GET /jobs/:id/tracking`) | `/jobs` |
 | `AssignmentsModule` | Guardian accept/decline offers | `/assignments` |
 | `DispatchingModule` | Internal dispatch orchestration | (service; routes moved to jobs/assignments) |
 | `GuardiansModule` | Shift, heartbeat, guardian profile | `/guardians` |
@@ -164,13 +164,25 @@ Access payload ([`AuthUserPayload`](../src/auth/interfaces/auth-user.interface.t
 
 ## Async and integrations
 
-- **Redis:** OTP storage, refresh token revocation, optional caching ([`RedisModule`](../src/redis/redis.module.ts)).
-- **BullMQ / queue:** Background work ([`QueueModule`](../src/queue/queue.module.ts)).
-- **Outbox:** Reliable side effects ([`OutboxModule`](../src/outbox/outbox.module.ts)).
+- **Redis:** OTP storage, refresh token revocation, guardian presence for dispatch and tracking ([`PresenceService`](../src/redis/presence.service.ts)).
+- **BullMQ / queue:** Offer expiry, connectivity checks ([`QueueModule`](../src/queue/queue.module.ts)).
+- **Outbox:** Dispatch retries via `JOB_DISPATCH_REQUESTED` ([`OutboxModule`](../src/outbox/outbox.module.ts), [`DispatchingService`](../src/dispatching/dispatching.service.ts)).
 - **Documents:** Verification file bytes stored in PostgreSQL `system.document_storage.content` ([`DocumentsService`](../src/documents/documents.service.ts)); configure `DOCUMENT_MAX_BYTES`.
+
+### Dispatch and client live tracking
+
+| Concern | Implementation |
+|---------|----------------|
+| Offer flow | Sequential offers (`OFFERED`, 90s TTL); guardian `shift` + heartbeat required |
+| Guardian GPS | `POST /guardians/me/heartbeat` → Redis + `location_history` |
+| Client map/ETA | `GET /jobs/:id/tracking` — job-scoped; [`JobsService.getTracking`](../src/jobs/jobs.service.ts), [`geo.util`](../src/common/geo.util.ts) |
+
+Mobile integration: [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md).
 
 ## Related docs
 
 - [user-journeys.md](user-journeys.md) — business flows
 - [api/README.md](api/README.md) — HTTP surface
+- [api/jobs.md](api/jobs.md) — jobs & tracking endpoints
+- [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md) — mobile dispatch & tracking
 - [operations.md](operations.md) — deployment

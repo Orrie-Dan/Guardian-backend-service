@@ -16,7 +16,10 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 
 | Doc | Contents |
 |-----|----------|
+| [jobs.md](jobs.md) | **Jobs API:** routes, statuses, dispatch summary, `GET …/tracking` contract |
 | [client-integration.md](client-integration.md) | **Frontend/mobile:** which API for which screen, tokens, upload pattern |
+| [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md) | **Mobile (iOS/Android):** dispatch, accept, live map/ETA — single handoff doc |
+| [job-dispatch-frontend.md](job-dispatch-frontend.md) | **Frontend/mobile:** job create → dispatch → accept (client + guardian polling) |
 | [guardians.md](guardians.md) | **Guardian app:** duty status map (offline / available / busy), shift & heartbeat |
 | [onboarding.md](onboarding.md) | Client registration v2, complete site, error codes |
 | [admin-onboarding.md](admin-onboarding.md) | **Admin:** guardian create, vetting, verify, activate |
@@ -33,7 +36,7 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | `/auth` | Registration, sign-in, refresh | Mostly `@Public()`; see auth.md |
 | `/users` | Profile | Bearer JWT |
 | `/organizations` | Orgs, members, locations | Bearer JWT |
-| `/jobs` | Jobs, dispatch, complete, invoice | Bearer JWT + roles |
+| `/jobs` | Jobs, dispatch, complete, invoice, **live tracking** (`GET …/tracking`) | Bearer JWT + permissions |
 | `/assignments` | Accept/decline offers | Bearer JWT, `GUARDIAN` |
 | `/guardians` | Shift, heartbeat, me — see [guardians.md](guardians.md) | Bearer JWT, `GUARDIAN` |
 | `/admin` | Ops admin | Bearer JWT, `SUPER_ADMIN` or `OPS_ADMIN` |

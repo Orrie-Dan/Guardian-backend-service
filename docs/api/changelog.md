@@ -65,6 +65,19 @@ See [onboarding.md](onboarding.md).
 
 API unchanged. Documentation: [admin-onboarding.md](admin-onboarding.md) (request bodies, post-create state, ops screen map in [client-integration.md](client-integration.md)).
 
+## Jobs — live tracking (added)
+
+| Method | Path | Permission | Notes |
+|--------|------|------------|-------|
+| GET | `/guardians/me/jobs` | `jobs:read` | Paginated guardian job history (all job statuses); full detail per item (`location`, `organization`, guardian `assignments[]` + `incidents`, `statusHistory`) |
+| GET | `/jobs/:jobId/tracking` | `jobs:read` | Guardian position + site destination + `distanceMeters` / `etaMinutes` while assignment is `ACCEPTED`, `EN_ROUTE`, or `ON_SITE` |
+
+- Job-scoped only (clients do not get global `GET /guardians/:id/location`).
+- Guardian must send `POST /guardians/me/heartbeat` with lat/lng for fresh `location.source: "presence"`.
+- ETA is straight-line (haversine), not turn-by-turn routing.
+
+Docs: [jobs.md](jobs.md), [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md), [job-dispatch-frontend.md](job-dispatch-frontend.md) §4.3.1.
+
 ## Route migrations (dispatch / assignments)
 
 | Old | New |

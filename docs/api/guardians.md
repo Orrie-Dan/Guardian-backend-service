@@ -4,6 +4,7 @@ How product labels (**offline**, **available**, **busy**) map to API routes, dat
 
 **Schemas:** Swagger at `{API_URL}/docs` (`ShiftStatus`, `GuardianShiftState`).  
 **Guardian app screen map:** [client-integration.md](client-integration.md#profile--duty).  
+**Job offers & dispatch:** [job-dispatch-frontend.md](job-dispatch-frontend.md). **Mobile (heartbeat + client map):** [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md).  
 **Onboarding & eligibility:** [admin-onboarding.md](admin-onboarding.md#dispatch-and-shift-eligibility).
 
 ---
@@ -51,7 +52,7 @@ Do not send `BUSY` from the client; it is derived from assignment state.
 | Concept | Mechanism | Affects dispatch? |
 |---------|-----------|-------------------|
 | **Duty / availability** | `guardian_shift_state` row | Yes — dispatch queries `shift_status = AVAILABLE` and `available_for_jobs = true` |
-| **Reachable / location** | `POST /guardians/me/heartbeat` → Redis presence (~90s TTL) | Used for location history and connectivity checks; **does not** change `shift_status` |
+| **Reachable / location** | `POST /guardians/me/heartbeat` → presence (~90s TTL; Redis or in-memory) + `location_history` in PostgreSQL | Used for location history and connectivity checks; **does not** change `shift_status` |
 
 A guardian can be **on duty** (`AVAILABLE`) but temporarily **unreachable** if heartbeats stop; that does not automatically call `shift/end`.
 
@@ -92,13 +93,34 @@ stateDiagram-v2
 
 ---
 
+## Location read API
+
+Heartbeats **write** coordinates; these routes **read** the latest point or history (no Redis required — presence falls back to in-memory when `REDIS_ENABLED=false`).
+
+| Route | Permission | Description |
+|-------|------------|-------------|
+| `GET /guardians/me/jobs` | `jobs:read` | Paginated job history (all statuses); each item includes `location`, `organization`, your `assignments[]` (with `incidents`), and `statusHistory` |
+| `GET /guardians/me/location` | `guardians:read_self` | Latest fix for signed-in guardian |
+| `GET /guardians/me/location/history` | `guardians:read_self` | Paginated trail (`page`, `limit`, optional `since` ISO timestamp) |
+| `GET /guardians/:id/location` | `guardians:read` | Latest fix (ops / dispatch) |
+| `GET /guardians/:id/location/history` | `guardians:read` | Paginated trail |
+| `GET /admin/guardians/:id/location` | `admin:guardians:read` | Same as above for admin consoles |
+| `GET /admin/guardians/:id/location/history` | `admin:guardians:read` | Paginated trail |
+
+**Response (`GET …/location`):** `guardianId`, `latitude`, `longitude`, `speed`, `batteryLevel`, `recordedAt`, `source` (`presence` \| `history` \| `null`), `connected` (recent heartbeat), `reachable` (on duty per presence).
+
+Prefer polling `GET …/location` during an active job; send heartbeats with `latitude` and `longitude` every 15–30s.
+
+---
+
 ## Permissions
 
 | Permission | Routes |
 |------------|--------|
 | `guardians:shift` | `POST /guardians/me/shift/start`, `POST /guardians/me/shift/end` |
 | `guardians:heartbeat` | `POST /guardians/me/heartbeat` |
-| `guardians:read_self` | `GET /guardians/me` |
+| `guardians:read_self` | `GET /guardians/me`, `GET /guardians/me/location`, `GET /guardians/me/location/history` |
+| `guardians:read` | `GET /guardians/:id/location`, `GET /guardians/:id/location/history` |
 
 ---
 

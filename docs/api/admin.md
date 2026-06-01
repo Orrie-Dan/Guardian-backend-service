@@ -21,6 +21,25 @@ Safe removal of test or mistaken accounts. Requires permission `admin:users:dele
 
 Re-run `npm run db:seed:v1` (or permission seed) after deploy so `admin:users:delete` exists for ops roles.
 
+## Operations map (live guardians + client sites)
+
+Poll **`GET /admin/map/guardians`** every 10–15s for moving markers; load **`GET /admin/map/sites`** once or rarely for organization site pins (not live user GPS).
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/admin/map/guardians` | `admin:guardians:read` | All guardians with merged presence / last history |
+| GET | `/admin/map/sites` | `organizations:read` | All client organization locations |
+
+**Guardian query filters:** `status`, `verificationStatus`, `connectedOnly`, `onDutyOnly`, `withLocationOnly` (booleans as `true`/`false`).
+
+**Site query filters:** `coordinatePrecision` (`USER_PINNED` \| `DISTRICT_APPROX`), `locationStatus` (default `ACTIVE`), `organizationStatus`, `verificationStatus`, `primaryOnly`.
+
+Both responses include `items` and `generatedAt` (ISO timestamp).
+
+**Client apps** do not use the admin map for a single booked job. After a guardian accepts, clients poll **`GET /jobs/:jobId/tracking`** (`jobs:read`) for job-scoped guardian position and ETA. See [jobs.md](jobs.md) and [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md).
+
+---
+
 ## Guardian onboarding
 
 **Full guide (request bodies, state after create, errors):** [admin-onboarding.md](admin-onboarding.md).
@@ -32,7 +51,9 @@ Re-run `npm run db:seed:v1` (or permission seed) after deploy so `admin:users:de
 | GET | `/admin/guardians/:id` | Guardian detail |
 | PATCH | `/admin/guardians/:id` | Update profile |
 | POST | `/admin/guardians/:id/vetting` | Upsert RNP vetting record |
+| GET | `/admin/guardians/:id/certifications` | List certifications for a guardian |
 | POST | `/admin/guardians/:id/certifications` | Add certification |
+| GET | `/admin/certifications/:id` | Get one certification (with document metadata) |
 | POST | `/admin/guardians/:id/activate` | Activate guardian (sends OTP) |
 | POST | `/admin/guardians/:id/suspend` | Suspend guardian |
 
@@ -61,6 +82,7 @@ Use after a client completes registration (step 2). Approving the org enables `c
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/admin/verification/guardians` | Pending guardians |
+| GET | `/admin/verification/certifications` | Certification verification queue (`verificationStatus`, pagination; default `PENDING`) |
 | PATCH | `/admin/verification/guardians/:id` | Set guardian `verificationStatus` |
 | PATCH | `/admin/verification/certifications/:id` | Set certification `verificationStatus` |
 

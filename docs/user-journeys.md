@@ -150,6 +150,7 @@ sequenceDiagram
   API-->>Guardian: assignment offer
   Guardian->>API: POST /assignments/:id/accept
   Guardian->>API: POST /guardians/me/heartbeat
+  Client->>API: GET /jobs/:id/tracking
   Client->>API: POST /jobs/:id/complete
   Client->>API: GET /jobs/:id/invoice
   Client->>API: POST /payments
@@ -161,12 +162,15 @@ sequenceDiagram
 | List / detail | Client, guardian, admin | `GET /jobs`, `GET /jobs/:id` |
 | Dispatch | Client or admin | `POST /jobs/:id/dispatch` |
 | Accept / decline offer | Guardian | `POST /assignments/:id/accept`, `.../decline` |
+| Live map / ETA (client) | Client | `GET /jobs/:id/tracking` (after accept; poll ~10–15s) |
 | Cancel | Client owner / admin | `PATCH /jobs/:id/cancel` |
 | Complete | Client owner / admin | `POST /jobs/:id/complete` |
 | Invoice | Client | `GET /jobs/:id/invoice` |
 | Pay | Client (verified org) | `POST /payments` |
 
 Guardian duty and location: see [api/guardians.md](api/guardians.md) — `POST /guardians/me/shift/start` (available), `.../shift/end` (offline), `POST /guardians/me/heartbeat` (connectivity only).
+
+**API reference:** [api/jobs.md](api/jobs.md). **Frontend / mobile:** [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md) (handoff), [api/job-dispatch-frontend.md](api/job-dispatch-frontend.md) (dispatch rules & tracking §4.3.1).
 
 Legacy route names: [api/changelog.md](api/changelog.md).
 

@@ -92,6 +92,8 @@ Phone-first flow — see [api/onboarding.md](api/onboarding.md):
 4. `POST /api/v1/auth/register/submit` → access token
 5. After admin verifies the org: `POST /api/v1/organizations/:id/locations/primary/complete-site` with map coordinates before booking jobs
 
+**Mobile / job flows:** [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md) (dispatch, accept, `GET /jobs/:id/tracking`).
+
 ### Seeded client owner (skip registration)
 
 ```http
@@ -141,6 +143,7 @@ Set `REDIS_ENABLED=false` in `.env` if you are not running Redis locally.
 ## Next steps
 
 - **Client / mobile integration:** [api/client-integration.md](api/client-integration.md)
+- **Jobs & live tracking:** [api/jobs.md](api/jobs.md), [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md)
 - Product flows: [user-journeys.md](user-journeys.md)
 - System design: [architecture.md](architecture.md)
 - API policies and routes: [api/README.md](api/README.md)
