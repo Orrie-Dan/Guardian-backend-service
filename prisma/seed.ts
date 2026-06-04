@@ -5,6 +5,7 @@ import {
   JobType,
   OrgMemberRole,
   OrgType,
+  BillingPolicyModel,
   PricingModel,
   PrismaClient,
   RoleCode,
@@ -234,6 +235,22 @@ async function main() {
       },
     });
   }
+
+  await prisma.billingPolicy.upsert({
+    where: { id: '00000000-0000-4000-8000-000000000200' },
+    create: {
+      id: '00000000-0000-4000-8000-000000000200',
+      priority: 1,
+      model: BillingPolicyModel.MINIMUM_GUARANTEED,
+      minimumHours: 2,
+      organizationId: null,
+      jobType: null,
+    },
+    update: {
+      model: BillingPolicyModel.MINIMUM_GUARANTEED,
+      minimumHours: 2,
+    },
+  });
 
   await prisma.pricingRule.upsert({
     where: { id: '00000000-0000-4000-8000-000000000100' },

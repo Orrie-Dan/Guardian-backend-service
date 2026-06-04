@@ -37,6 +37,8 @@ export const CLIENT_STAFF_PERMISSIONS: readonly string[] = [
 export const CLIENT_OWNER_EXTRA_PERMISSIONS: readonly string[] = [
   'jobs:cancel',
   'jobs:complete',
+  'assignments:early_release_approve',
+  'assignments:early_release_reject',
   'payments:create',
   'payments:confirm',
   'organizations:update',
@@ -45,6 +47,7 @@ export const CLIENT_OWNER_EXTRA_PERMISSIONS: readonly string[] = [
   'organizations:invite_member',
   'organizations:remove_member',
   'organizations:create',
+  'billing:dispute',
 ] as const;
 
 export const GUARDIAN_PERMISSIONS: readonly string[] = [
@@ -59,6 +62,7 @@ export const GUARDIAN_PERMISSIONS: readonly string[] = [
   'assignments:en_route',
   'assignments:on_site',
   'assignments:complete',
+  'assignments:early_release',
   'jobs:read',
   'jobs:create_incident',
   'users:read_self',
@@ -79,10 +83,14 @@ export const OPS_ADMIN_PERMISSIONS: readonly string[] = [
   'admin:verification:write',
   'admin:pricing:read',
   'admin:pricing:write',
+  'admin:billing:read',
+  'admin:billing:write',
   'admin:audit:read',
   'admin:analytics:read',
   'admin:invoices:read',
+  'admin:invoices:resolve_dispute',
   'admin:payments:read',
+  'billing:dispute',
   'jobs:read',
   'jobs:create',
   'jobs:dispatch',
@@ -90,6 +98,8 @@ export const OPS_ADMIN_PERMISSIONS: readonly string[] = [
   'jobs:complete',
   'jobs:read_invoice',
   'assignments:no_show',
+  'assignments:early_release_approve',
+  'assignments:early_release_reject',
   'billing:read',
   'billing:issue',
   'billing:void',

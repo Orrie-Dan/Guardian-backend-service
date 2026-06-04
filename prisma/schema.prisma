@@ -5,7 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "customer", "guardian", "job", "billing", "audit", "analytics", "system", "public"]
+  schemas  = ["identity", "customer", "guardian", "job", "billing", "audit", "analytics", "system", "reference", "public"]
 }
 
 // --- identity ---
@@ -133,6 +133,8 @@ model User {
   guardianProfile        Guardian?
   guardiansActivated     Guardian[]           @relation("GuardianActivatedBy")
   vettingRecordsCreated  GuardianVettingRecord[] @relation("VettingBy")
+  invoicesDisputed       Invoice[]               @relation("InvoiceDisputedBy")
+  invoicesDisputeResolved Invoice[]              @relation("InvoiceDisputeResolvedBy")
 
   @@map("users")
   @@schema("identity")
@@ -269,6 +271,7 @@ model Organization {
   jobs                    Job[]
   invoices                Invoice[]
   pricingRules            PricingRule[]
+  billingPolicies         BillingPolicy[]
   verificationDocuments OrganizationVerificationDocument[]
 
   @@map("organizations")
@@ -513,6 +516,17 @@ model LocationHistory {
   @@schema("guardian")
 }
 
+// --- reference ---
+
+model District {
+  code    String   @id @db.VarChar(100)
+  name    String   @db.VarChar(100)
+  aliases String[] @default([])
+
+  @@map("districts")
+  @@schema("reference")
+}
+
 // --- job ---
 
 enum JobType {
@@ -541,6 +555,7 @@ enum JobStatus {
   DISPATCHING
   ASSIGNED
   IN_PROGRESS
+  AWAITING_CONFIRMATION
   COMPLETED
   FAILED
   CANCELLED
@@ -555,9 +570,25 @@ enum AssignmentStatus {
   EXPIRED
   EN_ROUTE
   ON_SITE
+  EARLY_RELEASE_REQUESTED
   COMPLETED
   NO_SHOW
   CANCELLED
+
+  @@schema("job")
+}
+
+enum EarlyReleaseResolution {
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+
+  @@schema("job")
+}
+
+enum NoShowTriggerType {
+  MANUAL
+  SYSTEM
 
   @@schema("job")
 }
@@ -600,19 +631,48 @@ model Job {
   specialInstructions    String?     @map("special_instructions")
   dispatchAttempts       Int         @default(0) @map("dispatch_attempts")
   maxDispatchAttempts    Int         @default(3) @map("max_dispatch_attempts")
-  createdAt              DateTime    @default(now()) @map("created_at")
-  updatedAt              DateTime    @updatedAt @map("updated_at")
+  dispatchDeadlineAt     DateTime?   @map("dispatch_deadline_at")
+  dispatchStartedAt      DateTime?   @map("dispatch_started_at")
+  offersSentCount        Int         @default(0) @map("offers_sent_count")
+  dispatchFailureReason  String?     @map("dispatch_failure_reason") @db.VarChar(64)
+  unreachableSince       DateTime?           @map("unreachable_since")
+  billingPolicyModel                      BillingPolicyModel? @map("billing_policy_model")
+  billingMinimumHours                     Decimal?            @map("billing_minimum_hours") @db.Decimal(6, 2)
+  billingPolicyResolvedAt                 DateTime?           @map("billing_policy_resolved_at")
+  billingAllowEarlyRelease                Boolean?            @map("billing_allow_early_release")
+  billingProrationEnabled                 Boolean?            @map("billing_proration_enabled")
+  billingEarlyReleaseRequiresClientApproval Boolean?          @map("billing_early_release_requires_client_approval")
+  billingAutoApproveAfterMinutes          Int?                @map("billing_auto_approve_after_minutes") @db.SmallInt
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
 
   organization Organization      @relation(fields: [organizationId], references: [id])
   location     Location          @relation(fields: [locationId], references: [id])
   creator      User              @relation(fields: [createdBy], references: [id])
   assignments  JobAssignment[]
   statusHistory JobStatusHistory[]
+  dispatchAuditLogs DispatchAuditLog[]
   invoice      Invoice?
 
   @@index([status, createdAt])
   @@index([organizationId, status])
+  @@index([status, dispatchDeadlineAt])
   @@map("jobs")
+  @@schema("job")
+}
+
+model DispatchAuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  jobId     String   @map("job_id") @db.Uuid
+  pass      Int      @default(0) @db.SmallInt
+  event     String   @db.VarChar(80)
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt(sort: Desc)])
+  @@map("dispatch_audit_logs")
   @@schema("job")
 }
 
@@ -629,6 +689,16 @@ model JobAssignment {
   arrivedAt       DateTime?        @map("arrived_at")
   completedAt     DateTime?        @map("completed_at")
   noShowReason    String?          @map("no_show_reason")
+  noShowReasonCode String?         @map("no_show_reason_code") @db.VarChar(64)
+  noShowTriggerType NoShowTriggerType? @map("no_show_trigger_type")
+  noShowReportedByUserId String?   @map("no_show_reported_by_user_id") @db.Uuid
+  noShowReportedByRole String?     @map("no_show_reported_by_role") @db.VarChar(40)
+  noShowAt        DateTime?        @map("no_show_at")
+  earlyReleaseRequestedAt   DateTime?               @map("early_release_requested_at")
+  earlyReleaseReason        String?                 @map("early_release_reason") @db.VarChar(500)
+  earlyReleaseResolvedAt    DateTime?               @map("early_release_resolved_at")
+  earlyReleaseResolution    EarlyReleaseResolution? @map("early_release_resolution")
+  earlyReleaseAutoApproveAt DateTime?               @map("early_release_auto_approve_at")
 
   job       Job            @relation(fields: [jobId], references: [id])
   guardian  Guardian       @relation(fields: [guardianId], references: [id])
@@ -638,6 +708,9 @@ model JobAssignment {
   @@index([jobId, status])
   @@index([guardianId, status])
   @@index([status, expiresAt])
+  @@index([status, acceptedAt])
+  @@index([status, noShowAt])
+  @@index([status, earlyReleaseAutoApproveAt])
   @@map("job_assignments")
   @@schema("job")
 }
@@ -687,10 +760,12 @@ enum PricingModel {
 
 enum InvoiceStatus {
   DRAFT
+  PENDING_CONFIRMATION
   ISSUED
   PAID
   PARTIALLY_PAID
   OVERDUE
+  DISPUTED
   VOID
 
   @@schema("billing")
@@ -711,6 +786,35 @@ enum PaymentProvider {
   BANK_TRANSFER
   CASH
 
+  @@schema("billing")
+}
+
+enum BillingPolicyModel {
+  BOOKED_BLOCK
+  ACTUAL_TIME
+  MINIMUM_GUARANTEED
+
+  @@schema("billing")
+}
+
+model BillingPolicy {
+  id                                String             @id @default(uuid()) @db.Uuid
+  priority                          Int                @db.SmallInt
+  organizationId                    String?            @map("organization_id") @db.Uuid
+  jobType                           JobType?           @map("job_type")
+  validFrom                         DateTime           @default(now()) @map("valid_from") @db.Date
+  validUntil                        DateTime?          @map("valid_until") @db.Date
+  model                             BillingPolicyModel
+  minimumHours                      Decimal            @default(2) @map("minimum_hours") @db.Decimal(6, 2)
+  prorationEnabled                  Boolean            @default(true) @map("proration_enabled")
+  allowEarlyRelease                 Boolean            @default(false) @map("allow_early_release")
+  earlyReleaseRequiresClientApproval Boolean           @default(true) @map("early_release_requires_client_approval")
+  autoApproveAfterMinutes           Int?               @map("auto_approve_after_minutes") @db.SmallInt
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([priority(sort: Desc)])
+  @@map("billing_policies")
   @@schema("billing")
 }
 
@@ -737,22 +841,45 @@ model PricingRule {
 }
 
 model Invoice {
-  id             String        @id @default(uuid()) @db.Uuid
-  organizationId String        @map("organization_id") @db.Uuid
-  jobId          String        @unique @map("job_id") @db.Uuid
-  subtotal       Decimal       @db.Decimal(12, 2)
-  taxAmount      Decimal       @default(0) @map("tax_amount") @db.Decimal(12, 2)
-  total          Decimal       @db.Decimal(12, 2)
-  currency       String        @default("RWF") @db.Char(3)
-  status         InvoiceStatus @default(DRAFT)
-  issuedAt       DateTime?     @map("issued_at")
-  dueAt          DateTime?     @map("due_at")
-  createdAt      DateTime      @default(now()) @map("created_at")
+  id                 String        @id @default(uuid()) @db.Uuid
+  organizationId     String        @map("organization_id") @db.Uuid
+  jobId              String        @unique @map("job_id") @db.Uuid
+  subtotal           Decimal       @db.Decimal(12, 2)
+  taxAmount          Decimal       @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  total              Decimal       @db.Decimal(12, 2)
+  currency           String        @default("RWF") @db.Char(3)
+  status             InvoiceStatus @default(DRAFT)
+  scheduledStartAt   DateTime?     @map("scheduled_start_at")
+  scheduledEndAt     DateTime?     @map("scheduled_end_at")
+  arrivedAt          DateTime?     @map("arrived_at")
+  completedAt        DateTime?     @map("completed_at")
+  scheduledHours     Decimal?      @map("scheduled_hours") @db.Decimal(8, 4)
+  actualHours        Decimal?      @map("actual_hours") @db.Decimal(8, 4)
+  billableHours      Decimal?      @map("billable_hours") @db.Decimal(8, 4)
+  billingBasis       String?       @map("billing_basis") @db.VarChar(40)
+  billingPolicyModel String?       @map("billing_policy_model") @db.VarChar(40)
+  lineItems          Json?         @map("line_items")
+  issuedAt                DateTime?     @map("issued_at")
+  dueAt                   DateTime?     @map("due_at")
+  voidReason              String?       @map("void_reason") @db.VarChar(500)
+  replacementInvoiceId    String?       @map("replacement_invoice_id") @db.Uuid
+  disputeReason           String?       @map("dispute_reason") @db.VarChar(500)
+  disputedAt              DateTime?     @map("disputed_at")
+  disputedBy              String?       @map("disputed_by") @db.Uuid
+  statusBeforeDispute     String?       @map("status_before_dispute") @db.VarChar(40)
+  disputeResolvedAt       DateTime?     @map("dispute_resolved_at")
+  disputeResolvedBy       String?       @map("dispute_resolved_by") @db.Uuid
+  disputeResolutionNote   String?       @map("dispute_resolution_note") @db.VarChar(500)
+  createdAt               DateTime      @default(now()) @map("created_at")
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  job          Job          @relation(fields: [jobId], references: [id])
-  payments     Payment[]
-  ebmReceipt   EbmReceipt?
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  job                Job          @relation(fields: [jobId], references: [id])
+  disputedByUser     User?        @relation("InvoiceDisputedBy", fields: [disputedBy], references: [id])
+  disputeResolvedByUser User?     @relation("InvoiceDisputeResolvedBy", fields: [disputeResolvedBy], references: [id])
+  replacementInvoice Invoice?     @relation("InvoiceReplacement", fields: [replacementInvoiceId], references: [id])
+  replacesInvoices   Invoice[]    @relation("InvoiceReplacement")
+  payments           Payment[]
+  ebmReceipt         EbmReceipt?
 
   @@index([organizationId, status])
   @@map("invoices")
