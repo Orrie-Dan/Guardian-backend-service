@@ -8,7 +8,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ClientInvoiceDetailDto } from '../billing/dto/invoice-detail.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
@@ -58,6 +59,7 @@ export class JobsController {
   }
 
   @Get(':id/invoice')
+  @ApiOkResponse({ type: ClientInvoiceDetailDto })
   @RequirePermissions('jobs:read_invoice')
   invoice(
     @Param('id', ParseUUIDPipe) id: string,

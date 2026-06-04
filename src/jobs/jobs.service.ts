@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { JobStatus, RoleCode } from '@prisma/client';
+import { BillingCalculationService } from '../billing/billing-calculation.service';
+import { toClientInvoiceDetail } from '../billing/invoice-detail.presenter';
+import { InvoiceViewService } from '../billing/invoice-view.service';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { AuditService } from '../common/services/audit.service';
 import {
@@ -20,6 +23,7 @@ import { OrganizationVerificationPolicy } from '../common/policies/organization-
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { DispatchingService } from '../dispatching/dispatching.service';
+import { DISPATCH_WINDOW_MS } from '../queue/queue.constants';
 import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -52,6 +56,8 @@ export class JobsService {
     private readonly dispatching: DispatchingService,
     private readonly emails: EmailNotificationService,
     private readonly guardianLocation: GuardianLocationService,
+    private readonly billingCalculation: BillingCalculationService,
+    private readonly invoiceView: InvoiceViewService,
   ) {}
 
   async create(dto: CreateJobDto, actor: AuthUserPayload, autoDispatch = true) {
@@ -71,6 +77,12 @@ export class JobsService {
     }
 
     const referenceNumber = await this.references.nextReference();
+    const scheduledStart = new Date(dto.scheduledStart);
+    const billingPolicy = await this.billingCalculation.resolveBillingPolicy(
+      dto.organizationId,
+      dto.jobType,
+      scheduledStart,
+    );
 
     const job = await this.prisma.$transaction(async (tx) => {
       const created = await tx.job.create({
@@ -81,12 +93,24 @@ export class JobsService {
           createdBy: actor.sub,
           jobType: dto.jobType,
           priority: dto.priority,
-          scheduledStart: new Date(dto.scheduledStart),
+          scheduledStart,
           scheduledEnd: new Date(dto.scheduledEnd),
           notes: dto.notes,
           specialInstructions: dto.specialInstructions,
           requestedGuardianCount: dto.requestedGuardianCount ?? 1,
           status: JobStatus.PENDING,
+          billingPolicyModel: billingPolicy.model,
+          billingMinimumHours: billingPolicy.minimumHours,
+          billingPolicyResolvedAt: new Date(),
+          billingAllowEarlyRelease: billingPolicy.allowEarlyRelease,
+          billingProrationEnabled: billingPolicy.prorationEnabled,
+          billingEarlyReleaseRequiresClientApproval:
+            billingPolicy.earlyReleaseRequiresClientApproval,
+          billingAutoApproveAfterMinutes: billingPolicy.autoApproveAfterMinutes,
+          dispatchDeadlineAt: autoDispatch
+            ? new Date(Date.now() + DISPATCH_WINDOW_MS)
+            : undefined,
+          dispatchStartedAt: autoDispatch ? new Date() : undefined,
         },
       });
 
@@ -288,7 +312,8 @@ export class JobsService {
     }
     if (
       job.status === JobStatus.COMPLETED ||
-      job.status === JobStatus.CANCELLED
+      job.status === JobStatus.CANCELLED ||
+      job.status === JobStatus.AWAITING_CONFIRMATION
     ) {
       throw new BadRequestException('Job cannot be cancelled');
     }
@@ -347,10 +372,18 @@ export class JobsService {
 
   async getInvoice(jobId: string, actor: AuthUserPayload) {
     await this.policy.assertJobAccess(jobId, actor);
-    return this.prisma.invoice.findUnique({
+    const invoice = await this.prisma.invoice.findUnique({
       where: { jobId },
-      include: { payments: true, ebmReceipt: true },
+      include: { payments: true, ebmReceipt: true, job: true },
     });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found for job');
+    }
+    const viewed = await this.invoiceView.applyPendingConfirmationOnView(
+      invoice,
+      actor.sub,
+    );
+    return toClientInvoiceDetail(viewed);
   }
 
   async createIncident(jobId: string, dto: CreateIncidentDto, actor: AuthUserPayload) {

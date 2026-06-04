@@ -10,8 +10,10 @@ import { DispatchingService } from '../dispatching/dispatching.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { BillingCalculationService } from '../billing/billing-calculation.service';
 import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { JobReferenceService } from './job-reference.service';
+import { InvoiceViewService } from '../billing/invoice-view.service';
 import { JobsService } from './jobs.service';
 
 describe('JobsService', () => {
@@ -56,6 +58,19 @@ describe('JobsService', () => {
           useValue: { sendToOrgOwners: jest.fn() },
         },
         { provide: GuardianLocationService, useValue: guardianLocation },
+        {
+          provide: BillingCalculationService,
+          useValue: {
+            resolveBillingPolicy: jest.fn().mockResolvedValue({
+              model: 'MINIMUM_GUARANTEED',
+              minimumHours: 2,
+            }),
+          },
+        },
+        {
+          provide: InvoiceViewService,
+          useValue: { applyPendingConfirmationOnView: jest.fn((inv) => inv) },
+        },
       ],
     }).compile();
 
