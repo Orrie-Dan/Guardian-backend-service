@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AdminModule } from './admin/admin.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AssignmentsModule } from './assignments/assignments.module';
@@ -45,6 +46,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     NotificationsModule,
     DocumentsModule,
     AdminModule,
+    AnalyticsModule,
     RegionsModule,
     WebhooksModule,
   ],

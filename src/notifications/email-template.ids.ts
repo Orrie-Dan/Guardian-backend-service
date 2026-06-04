@@ -15,10 +15,13 @@ export enum EmailTemplateId {
 
   JOB_CREATED = 'job.created',
   JOB_CANCELLED = 'job.cancelled',
-  JOB_COMPLETED = 'job.completed',
   DISPATCH_OFFER_RECEIVED = 'dispatch.offerReceived',
+  ASSIGNMENT_EARLY_RELEASE_REQUESTED = 'assignment.earlyReleaseRequested',
 
+  BILLING_INVOICE_AWAITING_CONFIRMATION = 'billing.invoiceAwaitingConfirmation',
   BILLING_INVOICE_ISSUED = 'billing.invoiceIssued',
+  BILLING_INVOICE_DISPUTED = 'billing.invoiceDisputed',
+  BILLING_INVOICE_DISPUTE_RESOLVED = 'billing.invoiceDisputeResolved',
   BILLING_INVOICE_VOIDED = 'billing.invoiceVoided',
   BILLING_PAYMENT_CONFIRMED = 'billing.paymentConfirmed',
 }

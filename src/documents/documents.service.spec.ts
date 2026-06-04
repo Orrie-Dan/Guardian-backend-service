@@ -16,6 +16,9 @@ describe('DocumentsService', () => {
     organizationVerificationDocument: {
       findFirst: jest.fn(),
     },
+    certification: {
+      findFirst: jest.fn(),
+    },
   };
   const audit = { log: jest.fn() };
   const config = {
@@ -93,9 +96,74 @@ describe('DocumentsService', () => {
       uploadedBy: 'other-user',
     });
     prisma.organizationVerificationDocument.findFirst.mockResolvedValue(null);
+    prisma.certification.findFirst.mockResolvedValue(null);
 
     await expect(service.getContent('doc-1', actor)).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('getVerificationDocumentContent allows certification-linked documents', async () => {
+    const adminActor = {
+      ...actor,
+      permissions: ['admin:verification:read'],
+    };
+    const pdf = Buffer.from('%PDF-1.4');
+    prisma.organizationVerificationDocument.findFirst.mockResolvedValue(null);
+    prisma.certification.findFirst.mockResolvedValue({ id: 'cert-1' });
+    prisma.documentStorage.findUnique.mockResolvedValue({
+      mimeType: 'application/pdf',
+      content: Uint8Array.from(pdf),
+    });
+
+    const result = await service.getVerificationDocumentContent(
+      'doc-1',
+      adminActor,
+    );
+
+    expect(result.buffer.equals(pdf)).toBe(true);
+    expect(result.mimeType).toBe('application/pdf');
+  });
+
+  it('getContent allows admin with verification read on certification-linked doc', async () => {
+    const adminActor = {
+      ...actor,
+      sub: 'admin-2',
+      permissions: ['admin:verification:read'],
+    };
+    const pdf = Buffer.from('%PDF-1.4');
+    prisma.documentStorage.findUnique
+      .mockResolvedValueOnce({ uploadedBy: 'admin-1' })
+      .mockResolvedValueOnce({
+        mimeType: 'application/pdf',
+        content: Uint8Array.from(pdf),
+      });
+    prisma.organizationVerificationDocument.findFirst.mockResolvedValue(null);
+    prisma.certification.findFirst.mockResolvedValue({ id: 'cert-1' });
+
+    const result = await service.getContent('doc-1', adminActor);
+
+    expect(result.buffer.equals(pdf)).toBe(true);
+  });
+
+  it('getContent allows guardian to read their certification document', async () => {
+    const guardianActor = {
+      ...actor,
+      sub: 'guardian-user',
+      guardianId: 'guardian-1',
+      permissions: ['documents:read'],
+    };
+    const pdf = Buffer.from('%PDF-1.4');
+    prisma.documentStorage.findUnique
+      .mockResolvedValueOnce({ uploadedBy: 'admin-1' })
+      .mockResolvedValueOnce({
+        mimeType: 'application/pdf',
+        content: Uint8Array.from(pdf),
+      });
+    prisma.certification.findFirst.mockResolvedValue({ id: 'cert-1' });
+
+    const result = await service.getContent('doc-1', guardianActor);
+
+    expect(result.buffer.equals(pdf)).toBe(true);
   });
 });

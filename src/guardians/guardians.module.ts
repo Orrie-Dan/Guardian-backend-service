@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RedisModule } from '../redis/redis.module';
 import { ConnectivityService } from './connectivity.service';
 import { GuardiansController } from './guardians.controller';
+import { GuardianDispatchEligibilityService } from './guardian-dispatch-eligibility.service';
 import { GuardianEligibilityService } from './guardian-eligibility.service';
 import { GuardianLocationService } from './guardian-location.service';
 import { GuardiansService } from './guardians.service';
@@ -16,6 +17,7 @@ import { ShiftStateService } from './shift-state.service';
     ConnectivityService,
     GuardianLocationService,
     GuardianEligibilityService,
+    GuardianDispatchEligibilityService,
   ],
   exports: [
     GuardiansService,
@@ -23,6 +25,7 @@ import { ShiftStateService } from './shift-state.service';
     ConnectivityService,
     GuardianLocationService,
     GuardianEligibilityService,
+    GuardianDispatchEligibilityService,
   ],
 })
 export class GuardiansModule {}

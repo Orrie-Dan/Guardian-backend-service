@@ -11,21 +11,22 @@ import {
   Res,
   StreamableFile,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiProduces, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiProduces, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
   CertificationVerificationStatus,
   GuardianVerificationStatus,
-  InvoiceStatus,
   VerificationStatus,
 } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { BillingOpsService } from '../billing/billing-ops.service';
 import { BillingService } from '../billing/billing.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
+import { AdminBillingPoliciesService } from './admin-billing-policies.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminMapService } from './admin-map.service';
 import { AdminGuardiansService } from './admin-guardians.service';
@@ -35,10 +36,18 @@ import { AdminVerificationService } from './admin-verification.service';
 import { AdminCreateCertificationDto } from './dto/admin-create-certification.dto';
 import { CreateGuardianDto } from './dto/create-guardian.dto';
 import { CreateVettingDto } from './dto/create-vetting.dto';
+import { ResolveDisputeDto } from '../billing/dto/resolve-dispute.dto';
+import { BillingReconciliationQueryDto } from './dto/billing-reconciliation-query.dto';
+import { ListAdminInvoicesQueryDto } from './dto/list-admin-invoices-query.dto';
+import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 import { ListGuardiansQueryDto } from './dto/list-guardians-query.dto';
+import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { ListVerificationCertificationsQueryDto } from './dto/list-verification-certifications-query.dto';
 import { ReviewVerificationDto } from './dto/review-verification.dto';
+import { AnalyticsBackfillDto } from './dto/analytics-backfill.dto';
+import { CreateBillingPolicyDto } from './dto/create-billing-policy.dto';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
+import { UpdateBillingPolicyDto } from './dto/update-billing-policy.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
 import { MapGuardiansQueryDto } from './dto/map-guardians-query.dto';
 import { MapSitesQueryDto } from './dto/map-sites-query.dto';
@@ -47,6 +56,7 @@ import { LocationHistoryQueryDto } from '../guardians/dto/location-history-query
 import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
+import { DispatchingService } from '../dispatching/dispatching.service';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -60,11 +70,20 @@ export class AdminController {
     private readonly verification: AdminVerificationService,
     private readonly documents: DocumentsService,
     private readonly pricing: AdminPricingService,
+    private readonly billingPolicies: AdminBillingPoliciesService,
     private readonly audit: AdminAuditService,
     private readonly analytics: AdminAnalyticsService,
     private readonly billing: BillingService,
+    private readonly billingOps: BillingOpsService,
     private readonly prisma: PrismaService,
+    private readonly dispatching: DispatchingService,
   ) {}
+
+  @Get('jobs/:id/dispatch-debug')
+  @RequirePermissions('admin:analytics:read')
+  getJobDispatchDebug(@Param('id', ParseUUIDPipe) id: string) {
+    return this.dispatching.getDispatchDebug(id);
+  }
 
   @Get('users/:id/delete-preview')
   @RequirePermissions('admin:users:delete')
@@ -208,12 +227,9 @@ export class AdminController {
 
   @Get('organizations')
   @RequirePermissions('admin:verification:read')
-  listOrganizations(
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: VerificationStatus,
-    @Query('search') search?: string,
-  ) {
-    return this.verification.listOrganizations(query, { status, search });
+  listOrganizations(@Query() query: ListOrganizationsQueryDto) {
+    const { status, search, ...pagination } = query;
+    return this.verification.listOrganizations(pagination, { status, search });
   }
 
   @Get('verification/documents/:documentId/content')
@@ -313,13 +329,58 @@ export class AdminController {
     return this.pricing.update(id, body, user.sub);
   }
 
+  @Get('billing-policies')
+  @RequirePermissions('admin:billing:read')
+  listBillingPolicies() {
+    return this.billingPolicies.list();
+  }
+
+  @Post('billing-policies')
+  @RequirePermissions('admin:billing:write')
+  createBillingPolicy(
+    @Body() body: CreateBillingPolicyDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.billingPolicies.create(body, user.sub);
+  }
+
+  @Patch('billing-policies/:id')
+  @RequirePermissions('admin:billing:write')
+  updateBillingPolicy(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateBillingPolicyDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.billingPolicies.update(id, body, user.sub);
+  }
+
+  @Get('billing/reconciliation')
+  @RequirePermissions('admin:billing:read')
+  billingReconciliation(@Query() query: BillingReconciliationQueryDto) {
+    const { from, to, organizationId, guardianId } = query;
+    return this.billingOps.getReconciliation({
+      from: new Date(from),
+      to: new Date(to),
+      organizationId,
+      guardianId,
+    });
+  }
+
   @Get('invoices')
   @RequirePermissions('admin:invoices:read')
-  listInvoices(
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: InvoiceStatus,
+  listInvoices(@Query() query: ListAdminInvoicesQueryDto) {
+    const { status, ...pagination } = query;
+    return this.billing.listAdmin(pagination, status ? { status } : undefined);
+  }
+
+  @Post('invoices/:id/resolve-dispute')
+  @RequirePermissions('admin:invoices:resolve_dispute')
+  resolveInvoiceDispute(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ResolveDisputeDto,
+    @CurrentUser() user: AuthUserPayload,
   ) {
-    return this.billing.listAdmin(query, status ? { status } : undefined);
+    return this.billing.resolveDispute(id, user.sub, body);
   }
 
   @Get('payments')
@@ -336,22 +397,31 @@ export class AdminController {
 
   @Get('audit-logs')
   @RequirePermissions('admin:audit:read')
-  searchAudit(
-    @Query() query: PaginationQueryDto,
-    @Query('actorUserId') actorUserId?: string,
-    @Query('entityType') entityType?: string,
-  ) {
-    return this.audit.search(query, { actorUserId, entityType });
+  searchAudit(@Query() query: ListAuditLogsQueryDto) {
+    const { actorUserId, entityType, ...pagination } = query;
+    return this.audit.search(pagination, { actorUserId, entityType });
   }
 
   @Get('analytics/jobs')
   @RequirePermissions('admin:analytics:read')
-  jobAnalytics(@Query('district') district?: string) {
-    return this.analytics.jobFacts({ district });
+  @ApiQuery({ name: 'district', required: false, type: String })
+  @ApiQuery({ name: 'from', required: false, type: String })
+  @ApiQuery({ name: 'to', required: false, type: String })
+  jobAnalytics(
+    @Query('district') district?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.analytics.jobFacts({
+      district,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
   }
 
   @Get('analytics/guardians')
   @RequirePermissions('admin:analytics:read')
+  @ApiQuery({ name: 'guardianId', required: false, type: String })
   guardianAnalytics(@Query('guardianId') guardianId?: string) {
     return this.analytics.guardianPerformance(guardianId);
   }
@@ -360,5 +430,17 @@ export class AdminController {
   @RequirePermissions('admin:analytics:read')
   dashboard() {
     return this.analytics.dashboard();
+  }
+
+  @Post('analytics/backfill')
+  @RequirePermissions('admin:analytics:read')
+  backfillAnalytics(@Body() dto: AnalyticsBackfillDto) {
+    return this.analytics.backfill({
+      from: new Date(dto.from),
+      to: new Date(dto.to),
+      district: dto.district,
+      organizationId: dto.organizationId,
+      guardianId: dto.guardianId,
+    });
   }
 }

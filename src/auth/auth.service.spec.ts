@@ -11,6 +11,7 @@ import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-
 import { PrismaService } from '../prisma/prisma.service';
 import { loadAuthUserPayload } from './auth-user.loader';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { ShiftStateService } from '../guardians/shift-state.service';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { PasswordService } from './password.service';
@@ -48,6 +49,7 @@ describe('AuthService', () => {
     sendToGuardianUser: jest.fn().mockResolvedValue({ sent: true }),
     sendBestEffort: jest.fn().mockResolvedValue({ sent: true }),
   };
+  const shiftState = { autoStartOnLogin: jest.fn() };
   const prisma = {
     user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     guardian: { findUnique: jest.fn() },
@@ -69,6 +71,7 @@ describe('AuthService', () => {
         { provide: PasswordService, useValue: passwords },
         { provide: PrimaryLocationSetupPolicy, useValue: locationSetup },
         { provide: EmailNotificationService, useValue: emails },
+        { provide: ShiftStateService, useValue: shiftState },
       ],
     }).compile();
 
@@ -339,5 +342,52 @@ describe('AuthService', () => {
       setupToken: 'setup-token',
     });
     expect(tokens.issueTokens).not.toHaveBeenCalled();
+  });
+
+  it('signInWithPassword auto-starts guardian shift when off duty', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'g-user',
+      passwordHash: 'hash',
+      passwordSetAt: new Date(),
+      status: UserStatus.ACTIVE,
+      onboardingCompletedAt: new Date(),
+      isPhoneVerified: true,
+      userRoles: [{ role: { code: RoleCode.GUARDIAN } }],
+    });
+    passwords.verify.mockResolvedValue(true);
+    prisma.user.update.mockResolvedValue({});
+    prisma.organizationUser.findMany.mockResolvedValue([]);
+    (loadAuthUserPayload as jest.Mock).mockResolvedValue({
+      sub: 'g-user',
+      roles: ['GUARDIAN'],
+      activeRole: 'GUARDIAN',
+      organizationIds: [],
+      guardianId: 'g-1',
+    });
+    tokens.issueTokens.mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresIn: '15m',
+    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'g-user',
+        passwordHash: 'hash',
+        passwordSetAt: new Date(),
+        status: UserStatus.ACTIVE,
+        onboardingCompletedAt: new Date(),
+        isPhoneVerified: true,
+        userRoles: [{ role: { code: RoleCode.GUARDIAN } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'g-user',
+        phoneNumber: '+250788123456',
+        fullName: 'Guardian One',
+        passwordSetAt: new Date(),
+      });
+
+    await service.signInWithPassword('+250788123456', 'password');
+
+    expect(shiftState.autoStartOnLogin).toHaveBeenCalledWith('g-1');
   });
 });

@@ -22,6 +22,7 @@ import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { ShiftStateService } from '../guardians/shift-state.service';
 
 @Injectable()
 export class AuthService {
@@ -33,6 +34,7 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly locationSetup: PrimaryLocationSetupPolicy,
     private readonly emails: EmailNotificationService,
+    private readonly shiftState: ShiftStateService,
   ) {}
 
   /** @deprecated Use POST /auth/sign-in/otp/request */
@@ -327,6 +329,10 @@ export class AuthService {
     }
 
     const tokenPair = await this.tokens.issueTokens(payload);
+
+    if (payload.guardianId) {
+      await this.shiftState.autoStartOnLogin(payload.guardianId);
+    }
 
     await this.audit.log({
       actorUserId: userId,

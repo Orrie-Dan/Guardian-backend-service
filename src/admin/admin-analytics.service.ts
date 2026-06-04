@@ -1,11 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class AdminAnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly analyticsMaterializer: AnalyticsService,
+  ) {}
 
-  jobFacts(filters?: { district?: string; from?: Date; to?: Date }) {
+  async jobFacts(filters?: { district?: string; from?: Date; to?: Date }) {
+    const now = new Date();
+    await this.analyticsMaterializer.backfillWindow({
+      from: filters?.from ?? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      to: filters?.to ?? now,
+      district: filters?.district,
+    });
+
     const where: Record<string, unknown> = {};
     if (filters?.district) {
       where.district = filters.district;
@@ -23,7 +34,14 @@ export class AdminAnalyticsService {
     });
   }
 
-  guardianPerformance(guardianId?: string) {
+  async guardianPerformance(guardianId?: string) {
+    const now = new Date();
+    await this.analyticsMaterializer.backfillWindow({
+      from: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      to: now,
+      guardianId,
+    });
+
     return this.prisma.guardianPerformanceDaily.findMany({
       where: guardianId ? { guardianId } : {},
       orderBy: { date: 'desc' },
@@ -48,12 +66,25 @@ export class AdminAnalyticsService {
       _sum: { totalRevenue: true },
     });
 
+    const kpis = await this.analyticsMaterializer.kpiSummary();
+
     return {
       jobCount,
       activeGuardians: guardianCount,
       pendingOrgVerifications: pendingOrgs,
       pendingGuardianVerifications: pendingGuardians,
       totalRevenue: revenue._sum.totalRevenue ?? 0,
+      kpis,
     };
+  }
+
+  backfill(input: {
+    from: Date;
+    to: Date;
+    district?: string;
+    organizationId?: string;
+    guardianId?: string;
+  }) {
+    return this.analyticsMaterializer.backfillWindow(input);
   }
 }

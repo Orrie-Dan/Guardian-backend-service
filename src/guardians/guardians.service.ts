@@ -12,6 +12,7 @@ import { guardianJobDetailInclude } from '../jobs/job-detail.include';
 import { EmploymentType } from '@prisma/client';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { AuditService } from '../common/services/audit.service';
+import { normalizeDistrict } from '../common/district.util';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { ConnectivityService } from './connectivity.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -88,7 +89,9 @@ export class GuardiansService {
     const updated = await this.prisma.guardian.update({
       where: { id: actor.guardianId },
       data: {
-        districtBase: dto.districtBase,
+        districtBase: dto.districtBase
+          ? normalizeDistrict(dto.districtBase)
+          : undefined,
         employmentType: dto.employmentType,
       },
     });

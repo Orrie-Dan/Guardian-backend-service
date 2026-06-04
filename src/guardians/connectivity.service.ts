@@ -57,9 +57,10 @@ export class ConnectivityService {
       });
     }
 
+    const reachable = await this.presence.isReachable(guardianId);
     await this.queue.enqueueConnectivityCheck(guardianId);
 
-    return { guardianId, recordedAt: now, reachable: true };
+    return { guardianId, recordedAt: now, reachable };
   }
 
   async evaluateStaleGuardian(guardianId: string): Promise<void> {

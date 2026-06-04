@@ -112,17 +112,7 @@ export class DocumentsService {
 
   async getContent(documentId: string, actor: AuthUserPayload) {
     await this.assertCanAccess(documentId, actor);
-    const doc = await this.prisma.documentStorage.findUnique({
-      where: { id: documentId },
-      select: { mimeType: true, content: true },
-    });
-    if (!doc?.content) {
-      throw new NotFoundException('Document not found');
-    }
-    return {
-      buffer: Buffer.from(doc.content),
-      mimeType: doc.mimeType,
-    };
+    return this.loadDocumentContent(documentId);
   }
 
   async getVerificationDocumentContent(
@@ -136,13 +126,14 @@ export class DocumentsService {
       });
     }
 
-    const link = await this.prisma.organizationVerificationDocument.findFirst({
-      where: { documentId },
-    });
-    if (!link) {
+    if (!(await this.isLinkedForAdminReview(documentId))) {
       throw new NotFoundException('Document not found');
     }
 
+    return this.loadDocumentContent(documentId);
+  }
+
+  private async loadDocumentContent(documentId: string) {
     const doc = await this.prisma.documentStorage.findUnique({
       where: { id: documentId },
       select: { mimeType: true, content: true },
@@ -155,6 +146,21 @@ export class DocumentsService {
       buffer: Buffer.from(doc.content),
       mimeType: doc.mimeType,
     };
+  }
+
+  /** Org KYC or guardian certification evidence linked to this document id. */
+  private async isLinkedForAdminReview(documentId: string): Promise<boolean> {
+    const [orgLink, certification] = await Promise.all([
+      this.prisma.organizationVerificationDocument.findFirst({
+        where: { documentId },
+        select: { id: true },
+      }),
+      this.prisma.certification.findFirst({
+        where: { documentId },
+        select: { id: true },
+      }),
+    ]);
+    return !!(orgLink ?? certification);
   }
 
   private async assertCanAccess(
@@ -173,12 +179,18 @@ export class DocumentsService {
       return;
     }
 
+    if (actor.guardianId) {
+      const ownCert = await this.prisma.certification.findFirst({
+        where: { documentId, guardianId: actor.guardianId },
+        select: { id: true },
+      });
+      if (ownCert) {
+        return;
+      }
+    }
+
     if (actor.permissions?.includes(ADMIN_VERIFICATION_READ)) {
-      const link =
-        await this.prisma.organizationVerificationDocument.findFirst({
-          where: { documentId },
-        });
-      if (link) {
+      if (await this.isLinkedForAdminReview(documentId)) {
         return;
       }
     }

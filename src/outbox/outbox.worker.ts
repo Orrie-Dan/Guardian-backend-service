@@ -7,6 +7,8 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { OUTBOX_EVENT_JOB_BILLING_AUTO_CONFIRM } from '../billing/billing.constants';
+import { BillingConfirmationService } from '../billing/billing-confirmation.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
 import { OutboxService } from './outbox.service';
 
@@ -20,6 +22,8 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     private readonly outbox: OutboxService,
     @Inject(forwardRef(() => DispatchingService))
     private readonly dispatching: DispatchingService,
+    @Inject(forwardRef(() => BillingConfirmationService))
+    private readonly billingConfirmation: BillingConfirmationService,
   ) {}
 
   onModuleInit(): void {
@@ -63,6 +67,11 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
         case 'JOB_DISPATCH_REQUESTED': {
           const payload = event.payload as { jobId: string };
           await this.dispatching.processDispatch(payload.jobId);
+          break;
+        }
+        case OUTBOX_EVENT_JOB_BILLING_AUTO_CONFIRM: {
+          const payload = event.payload as { jobId: string };
+          await this.billingConfirmation.processAutoConfirm(payload.jobId);
           break;
         }
         default:

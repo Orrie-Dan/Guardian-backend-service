@@ -15,6 +15,7 @@ import {
 import { AuditService } from '../common/services/audit.service';
 import { DocumentsService } from '../documents/documents.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { PasswordService } from './password.service';
@@ -37,6 +38,7 @@ describe('RegisterOnboardingService', () => {
   const documents = { upload: jest.fn() };
   const auth = { issueFullAuthResponse: jest.fn().mockResolvedValue({ accessToken: 'a' }) };
   const audit = { log: jest.fn() };
+  const emails = { sendToUser: jest.fn() };
 
   const prisma = {
     user: {
@@ -74,6 +76,7 @@ describe('RegisterOnboardingService', () => {
         { provide: PasswordService, useValue: passwords },
         { provide: DocumentsService, useValue: documents },
         { provide: AuthService, useValue: auth },
+        { provide: EmailNotificationService, useValue: emails },
       ],
     }).compile();
 

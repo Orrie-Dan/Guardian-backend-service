@@ -149,14 +149,17 @@ export function renderEmailTemplate(
       });
     }
 
-    case EmailTemplateId.JOB_COMPLETED:
-      return buildRenderedEmail(`Job ${jobRef} completed`, {
+    case EmailTemplateId.ASSIGNMENT_EARLY_RELEASE_REQUESTED:
+      return buildRenderedEmail(`Early release requested — job ${jobRef}`, {
         greetingName: name,
         paragraphs: [
-          `Job ${jobRef} for ${orgName} is marked completed.`,
-          'An invoice may be issued shortly if applicable.',
+          `A guardian has requested to end job ${jobRef} for ${orgName} before the scheduled end time.`,
+          'Review and approve or reject in the client app.',
         ],
-        callouts: [{ label: 'Job reference', value: jobRef }],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Reason', value: String(payload.reason ?? '—') },
+        ],
       });
 
     case EmailTemplateId.DISPATCH_OFFER_RECEIVED:
@@ -169,13 +172,32 @@ export function renderEmailTemplate(
         callouts: [{ label: 'Job reference', value: jobRef }],
       });
 
-    case EmailTemplateId.BILLING_INVOICE_ISSUED: {
+    case EmailTemplateId.BILLING_INVOICE_AWAITING_CONFIRMATION: {
       const amount = `${payload.amount ?? '—'} ${payload.currency ?? ''}`.trim();
-      return buildRenderedEmail(`Invoice issued for job ${jobRef}`, {
+      const billableHours = String(payload.billableHours ?? '—');
+      const billingBasis = String(payload.billingBasis ?? '—');
+      return buildRenderedEmail(`Job ${jobRef} — confirm billing`, {
         greetingName: name,
         paragraphs: [
-          `An invoice was issued for ${orgName} (job ${jobRef}).`,
-          'Sign in to view and pay.',
+          `Guardian work on job ${jobRef} for ${orgName} is complete.`,
+          'Review the draft invoice below and confirm in the app to issue the invoice.',
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Billing basis', value: billingBasis },
+          { label: 'Billable hours', value: billableHours },
+          { label: 'Estimated total', value: amount },
+        ],
+      });
+    }
+
+    case EmailTemplateId.BILLING_INVOICE_ISSUED: {
+      const amount = `${payload.amount ?? '—'} ${payload.currency ?? ''}`.trim();
+      return buildRenderedEmail(`Job ${jobRef} completed — invoice ready`, {
+        greetingName: name,
+        paragraphs: [
+          `Job ${jobRef} for ${orgName} is complete.`,
+          'Your invoice is ready — sign in to view and pay.',
         ],
         callouts: [
           { label: 'Job reference', value: jobRef },
@@ -184,13 +206,41 @@ export function renderEmailTemplate(
       });
     }
 
+    case EmailTemplateId.BILLING_INVOICE_DISPUTED:
+      return buildRenderedEmail(`Invoice disputed — job ${jobRef}`, {
+        greetingName: name,
+        paragraphs: [
+          `An invoice for ${orgName} (job ${jobRef}) was disputed.`,
+          'Our team will review and follow up.',
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Reason', value: reason },
+        ],
+      });
+
+    case EmailTemplateId.BILLING_INVOICE_DISPUTE_RESOLVED:
+      return buildRenderedEmail(`Dispute resolved — job ${jobRef}`, {
+        greetingName: name,
+        paragraphs: [
+          `The billing dispute for ${orgName} (job ${jobRef}) was resolved.`,
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Resolution', value: reason },
+        ],
+      });
+
     case EmailTemplateId.BILLING_INVOICE_VOIDED:
       return buildRenderedEmail(`Invoice voided for job ${jobRef}`, {
         greetingName: name,
         paragraphs: [
           `An invoice for ${orgName} (job ${jobRef}) was voided.`,
         ],
-        callouts: [{ label: 'Job reference', value: jobRef }],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Reason', value: reason },
+        ],
       });
 
     case EmailTemplateId.BILLING_PAYMENT_CONFIRMED: {
