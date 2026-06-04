@@ -1,9 +1,10 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PaymentProvider, PaymentStatus, Prisma } from '@prisma/client';
+import { InvoiceStatus, PaymentProvider, PaymentStatus, Prisma } from '@prisma/client';
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,6 +41,16 @@ export class PaymentsService {
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
+    }
+    if (invoice.status === InvoiceStatus.DISPUTED) {
+      throw new BadRequestException(
+        'Payment cannot be created while invoice is disputed',
+      );
+    }
+    if (invoice.status !== InvoiceStatus.ISSUED && invoice.status !== InvoiceStatus.PARTIALLY_PAID) {
+      throw new BadRequestException(
+        'Payment can only be created for issued invoices',
+      );
     }
 
     await this.locationSetup.assertCanBookJobs(invoice.organizationId);

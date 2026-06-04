@@ -1,10 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
 import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  AssignmentStatus,
   InvoiceStatus,
   Job,
   JobType,
   Location,
-  PricingModel,
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../common/services/audit.service';
@@ -18,6 +22,27 @@ import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { OutboxService } from '../outbox/outbox.service';
+import { BillingCalculationService } from './billing-calculation.service';
+import {
+  BILLING_AUTO_CONFIRM_MS,
+  OUTBOX_EVENT_JOB_BILLING_AUTO_CONFIRM,
+} from './billing.constants';
+import { DisputeInvoiceDto } from './dto/dispute-invoice.dto';
+import {
+  DisputeResolutionAction,
+  ResolveDisputeDto,
+} from './dto/resolve-dispute.dto';
+import { VoidInvoiceDto } from './dto/void-invoice.dto';
+import {
+  isDisputableStatus,
+  isIssuableStatus,
+} from './invoice-status.util';
+import {
+  toClientInvoiceDetail,
+  toClientInvoiceSummary,
+} from './invoice-detail.presenter';
+import { InvoiceViewService } from './invoice-view.service';
 
 type JobWithLocation = Job & { location: Location };
 
@@ -28,6 +53,9 @@ export class BillingService {
     private readonly audit: AuditService,
     private readonly policy: ResourceOwnerPolicy,
     private readonly emails: EmailNotificationService,
+    private readonly calculation: BillingCalculationService,
+    private readonly outbox: OutboxService,
+    private readonly invoiceView: InvoiceViewService,
   ) {}
 
   async resolvePrice(
@@ -68,12 +96,31 @@ export class BillingService {
     return match;
   }
 
-  async createInvoiceForJob(job: JobWithLocation) {
+  async createDraftInvoiceForJobId(jobId: string, actorUserId: string) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      include: { location: true },
+    });
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+    return this.createDraftInvoiceForJob(job, actorUserId);
+  }
+
+  async createDraftInvoiceForJob(job: JobWithLocation, actorUserId: string) {
     const existing = await this.prisma.invoice.findUnique({
       where: { jobId: job.id },
     });
     if (existing) {
       return existing;
+    }
+
+    const assignment = await this.prisma.jobAssignment.findFirst({
+      where: { jobId: job.id, status: AssignmentStatus.COMPLETED },
+      orderBy: { completedAt: 'desc' },
+    });
+    if (!assignment) {
+      throw new NotFoundException('No completed assignment for job');
     }
 
     const rule = await this.resolvePrice(
@@ -83,46 +130,108 @@ export class BillingService {
       job.scheduledStart,
     );
 
-    const hours =
-      (job.scheduledEnd.getTime() - job.scheduledStart.getTime()) /
-      (1000 * 60 * 60);
-    const guardians = job.requestedGuardianCount;
+    const billingPolicy = await this.calculation.resolveBillingPolicy(
+      job.organizationId,
+      job.jobType,
+      job.scheduledStart,
+    );
 
-    let subtotal = new Prisma.Decimal(0);
-    if (rule.pricingModel === PricingModel.HOURLY && rule.hourlyRate) {
-      subtotal = rule.hourlyRate.mul(hours).mul(guardians);
-    } else if (rule.pricingModel === PricingModel.FLAT && rule.flatFee) {
-      subtotal = rule.flatFee.mul(guardians);
-    } else {
-      throw new NotFoundException('Pricing rule has no applicable rate');
-    }
+    const amounts = this.calculation.computeInvoiceAmounts({
+      job,
+      assignment,
+      policy: billingPolicy,
+      pricingModel: rule.pricingModel,
+      hourlyRate: rule.hourlyRate,
+      flatFee: rule.flatFee,
+    });
 
-    const taxAmount = subtotal.mul(0.18);
-    const total = subtotal.add(taxAmount);
+    const taxAmount = amounts.subtotal.mul(0.18);
+    const total = amounts.subtotal.add(taxAmount);
 
-    return this.prisma.invoice.create({
+    const invoice = await this.prisma.invoice.create({
       data: {
         organizationId: job.organizationId,
         jobId: job.id,
-        subtotal,
+        subtotal: amounts.subtotal,
         taxAmount,
         total,
         currency: rule.currency,
         status: InvoiceStatus.DRAFT,
+        scheduledStartAt: job.scheduledStart,
+        scheduledEndAt: job.scheduledEnd,
+        arrivedAt: assignment.arrivedAt,
+        completedAt: assignment.completedAt,
+        scheduledHours: new Prisma.Decimal(amounts.scheduledHours),
+        actualHours: new Prisma.Decimal(amounts.actualHours),
+        billableHours: new Prisma.Decimal(amounts.billableHours),
+        billingBasis: amounts.billingBasis,
+        billingPolicyModel: amounts.billingBasis,
+        lineItems: amounts.lineItems as Prisma.InputJsonValue,
       },
     });
+
+    await this.audit.log({
+      actorUserId,
+      action: 'INVOICE_DRAFT_CREATED',
+      entityType: 'billing.invoices',
+      entityId: invoice.id,
+      afterState: {
+        billableHours: amounts.billableHours,
+        billingBasis: amounts.billingBasis,
+      },
+    });
+
+    await this.outbox.enqueue({
+      aggregateType: 'job',
+      aggregateId: job.id,
+      eventType: OUTBOX_EVENT_JOB_BILLING_AUTO_CONFIRM,
+      payload: { jobId: job.id },
+      scheduledAt: new Date(Date.now() + BILLING_AUTO_CONFIRM_MS),
+    });
+
+    await this.emails.sendToOrgOwners(
+      job.organizationId,
+      EmailTemplateId.BILLING_INVOICE_AWAITING_CONFIRMATION,
+      {
+        jobReference: job.referenceNumber,
+        jobId: job.id,
+        amount: total.toString(),
+        currency: rule.currency,
+        billableHours: amounts.billableHours.toFixed(2),
+        scheduledHours: amounts.scheduledHours.toFixed(2),
+        actualHours: amounts.actualHours.toFixed(2),
+        billingBasis: amounts.billingBasis,
+      },
+      { entityType: 'billing.invoices', entityId: invoice.id },
+    );
+
+    return invoice;
   }
 
-  listForOrganization(organizationId: string) {
-    return this.prisma.invoice.findMany({
+  /** @deprecated Use createDraftInvoiceForJobId; kept for callers during transition. */
+  async createAndIssueInvoiceForJobId(jobId: string, actorUserId: string) {
+    const invoice = await this.createDraftInvoiceForJobId(jobId, actorUserId);
+    return this.issueIfDraft(invoice.id, actorUserId);
+  }
+
+  async createAndIssueInvoiceForJob(job: JobWithLocation, actorUserId: string) {
+    const invoice = await this.createDraftInvoiceForJob(job, actorUserId);
+    return this.issueIfDraft(invoice.id, actorUserId);
+  }
+
+  async listForOrganization(organizationId: string) {
+    const invoices = await this.prisma.invoice.findMany({
       where: { organizationId },
-      include: { payments: true, job: true },
+      include: {
+        job: { select: { referenceNumber: true, status: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
+    return invoices.map(toClientInvoiceSummary);
   }
 
   async getInvoice(id: string, actor: AuthUserPayload) {
-    const invoice = await this.prisma.invoice.findUnique({
+    let invoice = await this.prisma.invoice.findUnique({
       where: { id },
       include: { payments: true, ebmReceipt: true, job: true },
     });
@@ -130,19 +239,42 @@ export class BillingService {
       throw new NotFoundException('Invoice not found');
     }
     await this.policy.assertOrgMember(invoice.organizationId, actor);
-    return invoice;
+
+    const viewed = await this.invoiceView.applyPendingConfirmationOnView(
+      invoice,
+      actor.sub,
+    );
+    return toClientInvoiceDetail(viewed);
   }
 
-  async issue(id: string, actor: AuthUserPayload) {
+  async issueDraftForJobId(jobId: string, actorUserId: string) {
     const invoice = await this.prisma.invoice.findUnique({
-      where: { id },
+      where: { jobId },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found for job');
+    }
+    return this.issueIfDraft(invoice.id, actorUserId);
+  }
+
+  /** Issues a DRAFT or PENDING_CONFIRMATION invoice; no-op if already issued or paid. */
+  async issueIfDraft(invoiceId: string, actorUserId?: string) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
       include: { job: { select: { referenceNumber: true } } },
     });
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+    if (invoice.status === InvoiceStatus.DISPUTED) {
+      throw new BadRequestException('Cannot issue a disputed invoice');
+    }
+    if (!isIssuableStatus(invoice.status)) {
+      return invoice;
+    }
+
     const updated = await this.prisma.invoice.update({
-      where: { id },
+      where: { id: invoiceId },
       data: {
         status: InvoiceStatus.ISSUED,
         issuedAt: new Date(),
@@ -150,10 +282,10 @@ export class BillingService {
       },
     });
     await this.audit.log({
-      actorUserId: actor.sub,
+      actorUserId,
       action: 'INVOICE_ISSUED',
       entityType: 'billing.invoices',
-      entityId: id,
+      entityId: invoiceId,
     });
     await this.emails.sendToOrgOwners(
       invoice.organizationId,
@@ -163,13 +295,19 @@ export class BillingService {
         jobId: invoice.jobId,
         amount: invoice.total.toString(),
         currency: invoice.currency,
+        billableHours: invoice.billableHours?.toString(),
+        billingBasis: invoice.billingBasis ?? undefined,
       },
-      { entityType: 'billing.invoices', entityId: id },
+      { entityType: 'billing.invoices', entityId: invoiceId },
     );
     return updated;
   }
 
-  async voidInvoice(id: string, actor: AuthUserPayload) {
+  async issue(id: string, actor: AuthUserPayload) {
+    return this.issueIfDraft(id, actor.sub);
+  }
+
+  async voidInvoice(id: string, actor: AuthUserPayload, body: VoidInvoiceDto) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id },
       include: { job: { select: { referenceNumber: true } } },
@@ -177,15 +315,46 @@ export class BillingService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+    if (invoice.status === InvoiceStatus.VOID) {
+      return invoice;
+    }
+    if (invoice.status === InvoiceStatus.PAID) {
+      throw new BadRequestException('Cannot void a paid invoice');
+    }
+
+    if (body.replacementInvoiceId) {
+      await this.assertReplacementInvoice(
+        body.replacementInvoiceId,
+        invoice.organizationId,
+        id,
+      );
+    }
+
     const updated = await this.prisma.invoice.update({
       where: { id },
-      data: { status: InvoiceStatus.VOID },
+      data: {
+        status: InvoiceStatus.VOID,
+        voidReason: body.voidReason,
+        replacementInvoiceId: body.replacementInvoiceId ?? null,
+        disputeResolvedAt:
+          invoice.status === InvoiceStatus.DISPUTED ? new Date() : undefined,
+        disputeResolvedBy:
+          invoice.status === InvoiceStatus.DISPUTED ? actor.sub : undefined,
+        disputeResolutionNote:
+          invoice.status === InvoiceStatus.DISPUTED
+            ? body.voidReason
+            : undefined,
+      },
     });
     await this.audit.log({
       actorUserId: actor.sub,
       action: 'INVOICE_VOIDED',
       entityType: 'billing.invoices',
       entityId: id,
+      afterState: {
+        voidReason: body.voidReason,
+        replacementInvoiceId: body.replacementInvoiceId,
+      },
     });
     await this.emails.sendToOrgOwners(
       invoice.organizationId,
@@ -193,10 +362,158 @@ export class BillingService {
       {
         jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
         jobId: invoice.jobId,
+        reason: body.voidReason,
       },
       { entityType: 'billing.invoices', entityId: id },
     );
     return updated;
+  }
+
+  async disputeInvoice(
+    id: string,
+    actor: AuthUserPayload,
+    body: DisputeInvoiceDto,
+  ) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { job: { select: { referenceNumber: true } } },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+    await this.policy.assertOrgMember(invoice.organizationId, actor);
+
+    if (invoice.status === InvoiceStatus.DISPUTED) {
+      return invoice;
+    }
+    if (!isDisputableStatus(invoice.status)) {
+      throw new BadRequestException(
+        `Invoice in status ${invoice.status} cannot be disputed`,
+      );
+    }
+
+    const updated = await this.prisma.invoice.update({
+      where: { id },
+      data: {
+        status: InvoiceStatus.DISPUTED,
+        disputeReason: body.reason,
+        disputedAt: new Date(),
+        disputedBy: actor.sub,
+        statusBeforeDispute: invoice.status,
+      },
+    });
+
+    await this.audit.log({
+      actorUserId: actor.sub,
+      action: 'INVOICE_DISPUTED',
+      entityType: 'billing.invoices',
+      entityId: id,
+      beforeState: { status: invoice.status },
+      afterState: { status: InvoiceStatus.DISPUTED, reason: body.reason },
+    });
+
+    await this.emails.sendToOrgOwners(
+      invoice.organizationId,
+      EmailTemplateId.BILLING_INVOICE_DISPUTED,
+      {
+        jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
+        jobId: invoice.jobId,
+        reason: body.reason,
+      },
+      { entityType: 'billing.invoices', entityId: id },
+    );
+
+    return updated;
+  }
+
+  async resolveDispute(
+    id: string,
+    actorUserId: string,
+    body: ResolveDisputeDto,
+  ) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: { job: { select: { referenceNumber: true } } },
+    });
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+    if (invoice.status !== InvoiceStatus.DISPUTED) {
+      throw new BadRequestException('Invoice is not disputed');
+    }
+
+    if (body.action === DisputeResolutionAction.VOID) {
+      if (!body.voidReason) {
+        throw new BadRequestException('voidReason is required when voiding');
+      }
+      return this.voidInvoice(
+        id,
+        { sub: actorUserId } as AuthUserPayload,
+        {
+          voidReason: body.voidReason,
+          replacementInvoiceId: body.replacementInvoiceId,
+        },
+      );
+    }
+
+    const restoreStatus =
+      (invoice.statusBeforeDispute as InvoiceStatus | null) ??
+      InvoiceStatus.PENDING_CONFIRMATION;
+
+    const updated = await this.prisma.invoice.update({
+      where: { id },
+      data: {
+        status: restoreStatus,
+        disputeResolvedAt: new Date(),
+        disputeResolvedBy: actorUserId,
+        disputeResolutionNote: body.note ?? null,
+      },
+    });
+
+    await this.audit.log({
+      actorUserId,
+      action: 'INVOICE_DISPUTE_CLEARED',
+      entityType: 'billing.invoices',
+      entityId: id,
+      afterState: { status: restoreStatus, note: body.note },
+    });
+
+    await this.emails.sendToOrgOwners(
+      invoice.organizationId,
+      EmailTemplateId.BILLING_INVOICE_DISPUTE_RESOLVED,
+      {
+        jobReference: invoice.job?.referenceNumber ?? invoice.jobId,
+        jobId: invoice.jobId,
+        reason: body.note ?? 'Dispute cleared',
+      },
+      { entityType: 'billing.invoices', entityId: id },
+    );
+
+    return updated;
+  }
+
+  private async assertReplacementInvoice(
+    replacementInvoiceId: string,
+    organizationId: string,
+    voidedInvoiceId: string,
+  ) {
+    if (replacementInvoiceId === voidedInvoiceId) {
+      throw new BadRequestException(
+        'Replacement invoice cannot be the same invoice',
+      );
+    }
+    const replacement = await this.prisma.invoice.findUnique({
+      where: { id: replacementInvoiceId },
+      select: { id: true, organizationId: true, status: true },
+    });
+    if (!replacement) {
+      throw new NotFoundException('Replacement invoice not found');
+    }
+    if (replacement.organizationId !== organizationId) {
+      throw new BadRequestException(
+        'Replacement invoice must belong to the same organization',
+      );
+    }
   }
 
   async listAdmin(query: PaginationQueryDto, filters?: { status?: InvoiceStatus }) {
