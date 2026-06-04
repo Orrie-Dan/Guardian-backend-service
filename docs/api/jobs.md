@@ -13,6 +13,7 @@ Bearer JWT required. Permission codes are enforced per route (see [permissions s
 | Mobile (iOS/Android) | [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md) |
 | Web / client + guardian UX | [job-dispatch-frontend.md](job-dispatch-frontend.md) |
 | Screen → endpoint map | [client-integration.md](client-integration.md) |
+| Billing (confirm, invoice JSON) | [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md) |
 | Business flows | [../user-journeys.md](../user-journeys.md) §4 |
 
 ---
@@ -37,9 +38,10 @@ Implementation: [`JobsService`](../../src/jobs/jobs.service.ts), [`DispatchingSe
 | `PENDING` | Created; dispatch queued or retrying |
 | `DISPATCHING` | Explicit dispatch requested (`POST /jobs/:id/dispatch`) |
 | `ASSIGNED` | Guardian accepted an offer |
-| `IN_PROGRESS` | Guardian on site (assignment `ON_SITE` may set this) |
-| `COMPLETED` | Job closed |
-| `FAILED` | Dispatch exhausted (`dispatchAttempts >= maxDispatchAttempts`, default 3) |
+| `IN_PROGRESS` | Guardian on site (assignment `ON_SITE`) |
+| `AWAITING_CONFIRMATION` | Guardian completed; DRAFT invoice created; client must confirm (or auto-confirm after `BILLING_AUTO_CONFIRM_HOURS`) |
+| `COMPLETED` | Client confirmed billing (or auto-confirmed); invoice issued |
+| `FAILED` | Dispatch failed — see `dispatchFailureReason` (`dispatch_timeout`, `dispatch_pool_exhausted`, etc.) |
 | `CANCELLED` | Cancelled by client/admin |
 
 ---
@@ -53,12 +55,12 @@ Implementation: [`JobsService`](../../src/jobs/jobs.service.ts), [`DispatchingSe
 | GET | `/jobs/:id` | `jobs:read` | Detail: location, org, **assignments**, statusHistory |
 | GET | `/jobs/:id/tracking` | `jobs:read` | **Live guardian position + ETA** (see below) |
 | GET | `/jobs/:id/timeline` | `jobs:read` | Status history rows |
-| GET | `/jobs/:id/invoice` | `jobs:read_invoice` | Invoice for job |
+| GET | `/jobs/:id/invoice` | `jobs:read_invoice` | `ClientInvoiceDetail` — see [invoice-detail.md](invoice-detail.md) |
 | GET | `/jobs/:id/incidents` | `jobs:read` | Field incidents |
 | POST | `/jobs/:id/incidents` | `jobs:create_incident` | Report incident (guardian on assignment) |
 | POST | `/jobs/:id/dispatch` | `jobs:dispatch` | Queue dispatch; `PENDING`/`DISPATCHING` → `DISPATCHING` |
 | PATCH | `/jobs/:id/cancel` | `jobs:cancel` | Cancel; releases open offers |
-| POST | `/jobs/:id/complete` | `jobs:complete` | Complete job; triggers billing email |
+| POST | `/jobs/:id/complete` | `jobs:complete` | Client confirms billing: `AWAITING_CONFIRMATION` → `COMPLETED`, issues DRAFT invoice + `billing.invoiceIssued` email (idempotent if already `COMPLETED`) |
 
 ### List query (`GET /jobs`)
 
@@ -136,8 +138,12 @@ Guardian must call **`POST /guardians/me/heartbeat`** with `latitude` and `longi
 
 | Constant | Value | File |
 |----------|-------|------|
-| Offer TTL | 90 s | `src/queue/queue.constants.ts` (`OFFER_TTL_MS`) |
-| Max dispatch attempts | 3 | `MAX_DISPATCH_ATTEMPTS` |
+| Offer TTL | 90 s | `DISPATCH_OFFER_TTL_MS` → `OFFER_TTL_MS` |
+| Dispatch search window | 10 min | `DISPATCH_WINDOW_MS` — job → `FAILED` (`dispatch_timeout`) when exceeded |
+| Dispatch pool size | 50 | `DISPATCH_POOL_SIZE` — max guardians considered per pass |
+| Max offers per job | 20 | `MAX_OFFERS_PER_JOB` — safety cap |
+| Unreachable grace | 2 min | `DISPATCH_UNREACHABLE_GRACE_MS` |
+| URGENT parallel offers | 3 | `URGENT_PARALLEL_OFFERS` |
 | Presence TTL | 90 s | `src/redis/presence.service.ts` |
 
 ---
@@ -167,7 +173,10 @@ Not under `/jobs` — controller prefix **`/assignments`**:
 | POST | `/assignments/:id/decline` | `assignments:decline` |
 | POST | `/assignments/:id/en-route` | `assignments:en_route` |
 | POST | `/assignments/:id/on-site` | `assignments:on_site` |
-| POST | `/assignments/:id/complete` | `assignments:complete` |
+| POST | `/assignments/:id/early-release` | `assignments:early_release` | Guardian requests early end (see [early-release.md](early-release.md)) |
+| POST | `/assignments/:id/early-release/approve` | `assignments:early_release_approve` | Client approves early release |
+| POST | `/assignments/:id/early-release/reject` | `assignments:early_release_reject` | Client rejects; assignment returns `ON_SITE` |
+| POST | `/assignments/:id/complete` | `assignments:complete` | Completes from `ON_SITE` or approved `EARLY_RELEASE_REQUESTED`; job → `AWAITING_CONFIRMATION`; DRAFT invoice |
 
 Accept sets job → `ASSIGNED` and cancels other open offers for that job.
 

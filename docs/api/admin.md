@@ -85,6 +85,7 @@ Use after a client completes registration (step 2). Approving the org enables `c
 | GET | `/admin/verification/certifications` | Certification verification queue (`verificationStatus`, pagination; default `PENDING`) |
 | PATCH | `/admin/verification/guardians/:id` | Set guardian `verificationStatus` |
 | PATCH | `/admin/verification/certifications/:id` | Set certification `verificationStatus` |
+| GET | `/admin/verification/documents/:documentId/content` | Download org KYC or guardian cert file (`documentId` from list/detail metadata) |
 
 ## Dispatch eligibility (reference)
 
@@ -102,9 +103,68 @@ Guardians receive job offers only when:
 
 ## Other admin capabilities
 
-The admin controller also exposes pricing, audit, analytics, and billing helpers for operations.
+The admin controller also exposes pricing, billing policies, audit, analytics, and billing helpers for operations.
 
-Pricing setup guide: [admin-pricing.md](admin-pricing.md).
+| Topic | Guide |
+|-------|--------|
+| Pricing rates (hourly/flat) | [admin-pricing.md](admin-pricing.md) |
+| Billing policies (billable hours model) | [admin-billing-policies.md](admin-billing-policies.md) |
+| Billing ops (anomalies + reconciliation) | [admin-billing-ops.md](admin-billing-ops.md) |
+
+## Analytics contract (ops/admin)
+
+Use this section with [client-integration.md](client-integration.md) and [job-dispatch-frontend.md](job-dispatch-frontend.md) so admin dashboards use the same lifecycle semantics as mobile clients.
+
+### Analytics surfaces
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/admin/analytics/jobs` | Optional query: `district`, `from`, `to` (UTC ISO) |
+| GET | `/admin/analytics/guardians` | Optional query: `guardianId` |
+| GET | `/admin/analytics/dashboard` | Includes headline counters + KPI summary window |
+| POST | `/admin/analytics/backfill` | Manual recompute window: `{ from, to, district?, organizationId?, guardianId? }` |
+
+The analytics materializer runs automatically on a fixed interval and writes to `analytics.job_facts_daily` and `analytics.guardian_performance_daily`. Use manual backfill after data corrections, large imports, or formula updates.
+
+### Dashboard contract
+
+| Surface | Purpose | Refresh cadence |
+|---------|---------|-----------------|
+| **Dispatch funnel** | Track `job_created -> assignment_offered -> assignment_accepted -> assignment_completed` conversion and drop-off | 1-5 minutes |
+| **Latency panel** | Monitor p50/p95 for first offer, accept, on-site, and completion timings | 1-5 minutes |
+| **Reliability panel** | Watch `dispatch_failure_rate`, `offer_expiry_rate`, `no_show_rate`, cancellations by actor | 1-5 minutes |
+| **Coverage panel** | Compare available guardians vs incoming jobs by district/time window | 1-5 minutes |
+| **Weekly trends** | Aggregate KPI trends and cohort comparisons for reporting | Daily/weekly rollups |
+
+### Required analytics dimensions
+
+Every admin analytics slice should support, where data exists:
+
+- `district`
+- `organizationId`
+- `guardianId` / guardian cohort
+- `jobType`
+- `priority`
+- weekday/hour bucket
+
+### KPI formula baseline
+
+Use these formulas consistently across admin exports and dashboards:
+
+- `dispatch_conversion_rate = jobs_with_accepted_offer / jobs_created`
+- `offer_acceptance_rate = accepted_offers / total_offers`
+- `offer_expiry_rate = expired_offers / total_offers`
+- `no_show_rate = no_show_assignments / accepted_assignments`
+- `dispatch_failure_rate = jobs_failed / jobs_created`
+
+Latency KPIs should include both p50 and p95: `time_to_first_offer`, `time_to_accept`, `time_to_on_site`, `time_to_complete`.
+
+### Consistency and data governance
+
+- For operational timelines, assignment transitions are authoritative; job statuses are aggregate lifecycle state.
+- Distinguish no-show triggers in analytics (`MANUAL` vs `SYSTEM`) for policy evaluation.
+- Normalize event timestamps to UTC at ingest and convert in UI as needed.
+- Apply sample-size guardrails (for example, `< 20` events) before comparing small slices.
 
 ## Related
 

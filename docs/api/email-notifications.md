@@ -22,10 +22,13 @@ Guardian credential delivery (create guardian) uses a dedicated flow with **emai
 | *(credentials)* | `POST /admin/guardians` | Guardian email or SMS fallback | See credential delivery service |
 | `job.created` | Job create | Org owners | |
 | `job.cancelled` | Job cancel | Org owners | |
-| `job.completed` | Job complete (dispatch) | Org owners | |
 | `dispatch.offerReceived` | Guardian offered on dispatch | Guardian user email | Offer declined/expired are in-app only |
-| `billing.invoiceIssued` | Admin invoice issue | Org owners | |
-| `billing.invoiceVoided` | Admin invoice void | Org owners | |
+| `assignment.earlyReleaseRequested` | Guardian `POST /assignments/:id/early-release` (client approval required) | Org owners | Includes reason text |
+| `billing.invoiceAwaitingConfirmation` | Guardian `POST /assignments/:id/complete` (DRAFT invoice created) | Org owners | Includes billable hours and estimated total |
+| `billing.invoiceIssued` | `POST /jobs/:id/complete`, billing auto-confirm, or `POST /invoices/:id/issue` | Org owners | Idempotent if invoice already issued |
+| `billing.invoiceDisputed` | `POST /invoices/:id/dispute` | Org owners | Includes dispute reason |
+| `billing.invoiceDisputeResolved` | `POST /admin/invoices/:id/resolve-dispute` (`CLEAR`) | Org owners | |
+| `billing.invoiceVoided` | `POST /invoices/:id/void` or resolve `VOID` | Org owners | Includes void reason |
 | `billing.paymentConfirmed` | Payment confirm | Org owners | |
 
 ## Skipped sends

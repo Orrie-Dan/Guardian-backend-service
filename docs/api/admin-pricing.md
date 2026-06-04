@@ -111,10 +111,18 @@ If no rule matches, invoice creation fails with `No pricing rule matched`.
 
 ## Invoice calculation notes
 
-Current invoice math:
+**Billable hours** (from resolved billing policy on the job, default platform policy `MINIMUM_GUARANTEED`):
 
-- `HOURLY`: `subtotal = hourlyRate * hours * requestedGuardianCount`
-- `FLAT`: `subtotal = flatFee * requestedGuardianCount`
+- `BOOKED_BLOCK`: `billableHours = scheduledHours`
+- `ACTUAL_TIME`: `billableHours = min(scheduledHours, actualHours)`
+- `MINIMUM_GUARANTEED`: `billableHours = max(minimumHours, min(scheduledHours, actualHours))`
+
+`actualHours` = assignment `arrivedAt` → `completedAt`. Policy is snapshotted on job create (`billingPolicyModel`, `billingMinimumHours`).
+
+**Rates** (pricing rules):
+
+- `HOURLY`: `subtotal = hourlyRate * billableHours * requestedGuardianCount`
+- `FLAT`: `subtotal = flatFee * requestedGuardianCount` (duration recorded on invoice for transparency)
 - `taxAmount = subtotal * 0.18`
 - `total = subtotal + taxAmount`
 
@@ -138,5 +146,6 @@ Currency comes from the matched rule.
 | Doc | Use for |
 |-----|---------|
 | [admin.md](admin.md) | Full admin route index |
+| [admin-billing-policies.md](admin-billing-policies.md) | Billable-hours policy (separate from rates) |
 | [client-integration.md](client-integration.md) | Ops portal route mapping |
 | [../architecture.md](../architecture.md) | High-level module architecture |

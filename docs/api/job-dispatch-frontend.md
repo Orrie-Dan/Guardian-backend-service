@@ -68,6 +68,23 @@ Backend enum (`job.jobs.status`):
 
 **Important:** After `POST /jobs`, the job often stays **`PENDING`** until a guardian accepts. It may **never** become `DISPATCHING` unless the client calls `POST /jobs/:id/dispatch`. Auto-dispatch on create runs in the background without changing status to `DISPATCHING`.
 
+### 3.1 Analytics status mapping contract
+
+Use these mappings when computing analytics KPIs in admin or BI dashboards:
+
+| Analytics event | Status evidence |
+|-----------------|-----------------|
+| `job_created` | `POST /jobs` success (`job.status = PENDING`) |
+| `assignment_offered` | Assignment row with `status = OFFERED` |
+| `assignment_accepted` | `POST /assignments/:id/accept`; assignment `OFFERED -> ACCEPTED`; job `PENDING/DISPATCHING -> ASSIGNED` |
+| `assignment_on_site` | `POST /assignments/:id/on-site`; assignment reaches `ON_SITE`; job may move toward `IN_PROGRESS` |
+| `assignment_completed` | `POST /assignments/:id/complete`; assignment `ON_SITE -> COMPLETED`; job `ASSIGNED/IN_PROGRESS -> COMPLETED` |
+| `assignment_no_show` | Assignment `OFFERED/ACCEPTED/EN_ROUTE -> NO_SHOW`; job `ASSIGNED/IN_PROGRESS/DISPATCHING -> DISPATCHING` with re-dispatch request |
+| `offer_expired` | Assignment offer transitions to `EXPIRED` after TTL |
+| `job_failed` | Job reaches `FAILED` after dispatch attempt exhaustion |
+
+For no-show analytics, always retain trigger metadata (`MANUAL` from endpoint vs `SYSTEM` from automation) so policy no-shows are reported separately from user-driven no-shows.
+
 ---
 
 ## 4. Client app flow
@@ -369,14 +386,23 @@ Dispatch selects guardians only when **all** are true:
 
 ### Job stuck in `PENDING` (“finding guardian” forever)
 
-- No eligible guardian → server **retries dispatch** in the background; status may stay `PENDING` for a long time.
-- Client can call `POST /jobs/:id/dispatch` to force `DISPATCHING` and another pass.
-- Show a timeout UX (“Still looking…”) and support contact after N minutes.
+- Dispatch search is bounded by **`DISPATCH_WINDOW_MS`** (default **10 minutes** from job create / first dispatch). After the deadline, the job moves to **`FAILED`** with reason `dispatch_timeout`.
+- No eligible guardian → server retries in the background until the window expires.
+- Client can call `POST /jobs/:id/dispatch` to force `DISPATCHING` and another pass (deadline is set on first dispatch if missing).
+- Show a timeout UX (“Still looking…”) and treat `FAILED` as “could not assign”.
 
 ### `FAILED` status
 
-- Occurs when `dispatchAttempts >= maxDispatchAttempts` (default **3**) after offers were created and exhausted (decline/expiry cycles).
-- If **no guardian was ever found**, attempts may stay at 0 and job can remain `PENDING` (plan UI for prolonged search).
+Read `dispatchFailureReason` on the job (or the latest `FAILED` row in `GET /jobs/:id/timeline`):
+
+| `dispatchFailureReason` | Meaning |
+|-------------------------|---------|
+| `dispatch_timeout` | No guardian accepted within `DISPATCH_WINDOW_MS` |
+| `dispatch_pool_exhausted` | Every eligible guardian in the district was offered and declined/expired |
+| `dispatch_unreachable_pool` | Eligible guardians existed but none were reachable (heartbeat) for `DISPATCH_UNREACHABLE_GRACE_MS` |
+| `dispatch_max_offers_exceeded` | Safety cap `MAX_OFFERS_PER_JOB` reached |
+
+Ops debugging: `GET /admin/jobs/:id/dispatch-debug` (requires `admin:analytics:read`).
 
 ### Expired offers
 

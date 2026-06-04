@@ -7,10 +7,12 @@ Deployment and environment guidance for G2 Sentry Guardian.
 1. **Build** — `npm ci && npm run build`
 2. **Migrations** — `npx prisma migrate deploy` (never `migrate reset` in production)
 3. **Generate client** — `npx prisma generate` (usually part of CI build)
-4. **Secrets** — set production values for `JWT_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`; do not commit `.env`
-5. **Redis** — `REDIS_ENABLED=true` and reachable `REDIS_URL` for OTP and refresh revocation
-6. **Documents** — `DOCUMENT_MAX_BYTES` (optional); verification files stored in PostgreSQL — plan DB backup size accordingly
-7. **Node** — runtime Node 20+
+4. **Seed permissions** — `npm run db:seed` after billing/dispute/early-release releases
+5. **Secrets** — set production values for `JWT_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`; do not commit `.env`
+6. **Redis** — `REDIS_ENABLED=true` and reachable `REDIS_URL` for OTP and refresh revocation
+7. **Billing env** — `BILLING_AUTO_CONFIRM_HOURS`, `BILLING_OPS_*` — see [billing-overhaul-implementation.md](billing-overhaul-implementation.md)
+8. **Documents** — `DOCUMENT_MAX_BYTES` (optional); verification files stored in PostgreSQL — plan DB backup size accordingly
+9. **Node** — runtime Node 20+
 
 ## Environment variables
 
@@ -26,6 +28,10 @@ Copy from [`.env.example`](../.env.example). Production must override all `chang
 | `PINDO_ENABLED` | `true` in production |
 | `PINDO_API_TOKEN` | Bearer token from Pindo dashboard |
 | `PINDO_SENDER` | Registered sender name (e.g. your brand) |
+| `BILLING_AUTO_CONFIRM_HOURS` | Client invoice auto-issue delay (default 24) |
+| `BILLING_OPS_EARLY_COMPLETION_MINUTES` | Ops alert: early completion threshold (default 30) |
+| `BILLING_OPS_LATE_ARRIVAL_MINUTES` | Ops alert: late arrival threshold (default 15) |
+| `BILLING_OPS_SCAN_LOOKBACK_HOURS` | Ops scan lookback window (default 24) |
 
 ## Running in production
 
@@ -43,6 +49,19 @@ Process manager (PM2, systemd, Kubernetes) should restart on failure and run hea
 | Swagger `/docs` | Smoke-test endpoints after deploy (protect or disable in production if needed) |
 | `npx prisma studio` | Debug data locally only — not for production ops |
 | Application logs | Nest default logging; audit table for security-sensitive actions |
+
+### Analytics materialization runbook
+
+- Background analytics refresh runs in-process and recomputes recent windows into `analytics.job_facts_daily` and `analytics.guardian_performance_daily`.
+- Refresh interval is controlled by `ANALYTICS_REFRESH_INTERVAL_MS` (default `300000` = 5 minutes).
+- Manual recompute endpoint: `POST /api/v1/admin/analytics/backfill` with:
+  - required: `from`, `to` (UTC ISO timestamps)
+  - optional: `district`, `organizationId`, `guardianId`
+- Use manual backfill after imports, incident recovery, or KPI formula changes.
+- Verify health by checking:
+  - `/api/v1/admin/analytics/jobs` returns recent rows
+  - `/api/v1/admin/analytics/guardians` returns recent rows
+  - `/api/v1/admin/analytics/dashboard` shows non-stale KPI window and rates
 
 ## Database operations
 
@@ -66,6 +85,7 @@ Process manager (PM2, systemd, Kubernetes) should restart on failure and run hea
 | `ORG_PENDING_VERIFICATION` | Expected until admin verifies org — not a bug |
 | Prisma errors after deploy | Migration not applied; run `migrate deploy` |
 | Upload failures | File over `DOCUMENT_MAX_BYTES`; disallowed MIME type; multipart field names (`file`, `documentType` on registration) |
+| Analytics endpoints empty | Confirm materializer interval is running, then run `POST /admin/analytics/backfill` for the target window |
 
 ## Related
 

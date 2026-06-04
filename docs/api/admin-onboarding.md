@@ -138,7 +138,9 @@ Skip if vetting was created inline at step 1 with `rnpReferenceNumber`.
 | `issuer` | yes | |
 | `issueDate` | yes | ISO date |
 | `expiryDate` | no | ISO date |
-| `documentId` | no | Linked uploaded document |
+| `documentId` | no | UUID from `POST /documents` (upload file first, then pass `documentId` here) |
+
+View linked file: `GET /admin/verification/documents/:documentId/content` (same as org KYC; use `certification.document.id`, not certification id).
 
 **`certificationType` values:** `FIRST_AID`, `CROWD_CONTROL`, `FIREARM`, `RESERVE_FORCE`, `RNP_SECURITY_LICENSE`.
 

@@ -14,7 +14,7 @@ How product labels (**offline**, **available**, **busy**) map to API routes, dat
 | Product / UI label | Guardian action | API | `shift_status` | `available_for_jobs` |
 |--------------------|-----------------|-----|----------------|----------------------|
 | **Offline** (off duty) | Go offline | `POST /guardians/me/shift/end` | `OFF_DUTY` | `false` |
-| **Available** (on duty, taking jobs) | Go on duty | `POST /guardians/me/shift/start` | `AVAILABLE` | `true` |
+| **Available** (on duty, taking jobs) | Go on duty (optional — also automatic on sign-in) | `POST /guardians/me/shift/start` | `AVAILABLE` | `true` |
 | **Busy** (on an assignment) | *(none — server sets)* | — | `BUSY` | `false` |
 
 After a job completes or an offer expires, the server returns the guardian to **available** (`AVAILABLE` + `available_for_jobs: true`) when they were already on duty.
@@ -25,11 +25,13 @@ There is **no** single `PATCH /guardians/me/status` endpoint; use `shift/start` 
 
 ### Initial and admin-forced states
 
-| Situation | `shift_status` | `available_for_jobs` |
-|-----------|----------------|----------------------|
-| New guardian (`POST /admin/guardians`) | `OFF_DUTY` | `false` |
-| Admin suspend (`POST /admin/guardians/:id/suspend`) | `OFF_DUTY` | `false` |
-| Admin activate (profile only; guardian must start shift) | `OFF_DUTY` until `shift/start` | `false` |
+| Situation | `shift_status` | `available_for_jobs` | Notes |
+|-----------|----------------|----------------------|-------|
+| New guardian (`POST /admin/guardians`) | `OFF_DUTY` | `false` | |
+| Guardian sign-in (password or OTP) | `AVAILABLE` | `true` | Auto when previously `OFF_DUTY` and dispatch-eligible |
+| Guardian `POST /guardians/me/shift/end` (manual offline) | `OFF_DUTY` | `false` | Stays offline until next sign-in or `shift/start` |
+| Admin suspend (`POST /admin/guardians/:id/suspend`) | `OFF_DUTY` | `false` | |
+| Admin activate | `OFF_DUTY` until sign-in or `shift/start` | `false` | |
 
 ---
 
@@ -38,7 +40,7 @@ There is **no** single `PATCH /guardians/me/status` endpoint; use `shift/start` 
 | Value | Meaning | Set by |
 |-------|---------|--------|
 | `OFF_DUTY` | Offline — not in the dispatch pool | Guardian (`shift/end`), admin suspend, initial create |
-| `AVAILABLE` | On duty and eligible for new offers | Guardian (`shift/start`), server after job/offer cleanup |
+| `AVAILABLE` | On duty and eligible for new offers | Guardian sign-in (auto), `shift/start`, server after job/offer cleanup |
 | `BUSY` | On duty but on an active offer/job | Server (dispatch, assignments) |
 | `PAUSED` | Reserved in schema; **not used** by the API today | — |
 | `SUSPENDED` | Account-level suspension context | Admin flows |

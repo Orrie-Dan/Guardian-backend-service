@@ -9,6 +9,17 @@ Index for G2 Sentry Guardian. Start at the [project README](../README.md) for qu
 | [getting-started.md](getting-started.md) | Prerequisites, `.env`, database, npm scripts, dev OTP |
 | [user-journeys.md](user-journeys.md) | Client register, admin verify, guardian onboard, jobs |
 
+## Billing (production overhaul)
+
+| Document | Description |
+|----------|-------------|
+| [**billing-overhaul-implementation.md**](billing-overhaul-implementation.md) | **Start here:** phases 1–6 summary, deploy checklist, app integration |
+| [api/invoice-detail.md](api/invoice-detail.md) | Client invoice JSON contract |
+| [api/invoice-disputes.md](api/invoice-disputes.md) | Dispute and void lifecycle |
+| [api/early-release.md](api/early-release.md) | Early release workflow |
+| [api/admin-billing-policies.md](api/admin-billing-policies.md) | Admin billing policy CRUD |
+| [api/admin-billing-ops.md](api/admin-billing-ops.md) | Anomaly scan and reconciliation |
+
 ## System
 
 | Document | Description |

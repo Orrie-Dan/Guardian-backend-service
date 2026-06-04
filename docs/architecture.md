@@ -177,6 +177,11 @@ Access payload ([`AuthUserPayload`](../src/auth/interfaces/auth-user.interface.t
 | Guardian GPS | `POST /guardians/me/heartbeat` → Redis + `location_history` |
 | Client map/ETA | `GET /jobs/:id/tracking` — job-scoped; [`JobsService.getTracking`](../src/jobs/jobs.service.ts), [`geo.util`](../src/common/geo.util.ts) |
 
+### Dispatch roadmap prerequisites
+
+- Presence filtering currently checks reachability sequentially per guardian; before increasing candidate pool size or reducing offer TTL, switch to batched Redis reads (`MGET`/pipeline) in [`PresenceService`](../src/redis/presence.service.ts).
+- Realtime rollout must keep `GET /assignments/me` as an explicit reconciliation contract after disconnect/reconnect so missed push events do not leave clients with stale offer state.
+
 Mobile integration: [api/mobile-job-dispatch-and-tracking.md](api/mobile-job-dispatch-and-tracking.md).
 
 ## Related docs

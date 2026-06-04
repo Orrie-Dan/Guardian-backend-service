@@ -42,6 +42,7 @@ Admin routes (`/admin/*`) require `SUPER_ADMIN` or `OPS_ADMIN`. Those roles are 
 | Doc | Audience |
 |-----|----------|
 | [docs/README.md](docs/README.md) | Documentation index |
+| [docs/billing-overhaul-implementation.md](docs/billing-overhaul-implementation.md) | **Billing phases 1–6:** deploy, flows, app integration |
 | [docs/getting-started.md](docs/getting-started.md) | Local setup, env vars, commands |
 | [docs/user-journeys.md](docs/user-journeys.md) | Client, guardian, admin, and job flows |
 | [docs/architecture.md](docs/architecture.md) | Modules, schemas, auth, request pipeline |

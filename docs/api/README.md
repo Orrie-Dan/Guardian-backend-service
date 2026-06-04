@@ -12,6 +12,10 @@ http://localhost:3000/docs
 
 Use Swagger for request bodies, response shapes, and enums. Markdown docs here describe **flows, auth requirements, and policies** — not every field.
 
+## Billing overhaul (phases 1–6)
+
+**Implementation guide (deploy + app integration):** [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md)
+
 ## Domain guides
 
 | Doc | Contents |
@@ -24,6 +28,10 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | [onboarding.md](onboarding.md) | Client registration v2, complete site, error codes |
 | [admin-onboarding.md](admin-onboarding.md) | **Admin:** guardian create, vetting, verify, activate |
 | [admin-pricing.md](admin-pricing.md) | **Admin:** pricing rule setup, precedence, examples |
+| [admin-billing-policies.md](admin-billing-policies.md) | **Admin:** billing policy CRUD (billable hours models) |
+| [invoice-disputes.md](invoice-disputes.md) | Invoice dispute, void, and admin resolution |
+| [invoice-detail.md](invoice-detail.md) | Client invoice detail/summary JSON contract |
+| [admin-billing-ops.md](admin-billing-ops.md) | Billing anomaly scan and reconciliation report |
 | [auth.md](auth.md) | Sign-in, tokens |
 | [email-notifications.md](email-notifications.md) | Transactional email matrix and delivery semantics |
 | [admin.md](admin.md) | Admin route index, org/guardian/cert verification |

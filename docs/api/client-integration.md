@@ -3,6 +3,7 @@
 How frontend and mobile apps should call the G2 Sentry Guardian API: which routes to use, when, and what to check before calling them.
 
 **Schemas and field types:** Swagger at `{API_URL}/docs` (source of truth).  
+**Billing overhaul (confirmation, disputes, invoice JSON):** [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md)  
 **Deep flows:** [onboarding.md](onboarding.md), [admin-onboarding.md](admin-onboarding.md), [auth.md](auth.md), [guardians.md](guardians.md), [../user-journeys.md](../user-journeys.md).
 
 ## Base URL and headers
@@ -84,7 +85,7 @@ sequenceDiagram
 |---------|--------|----------|
 | Registration | `POST /auth/register/documents` (`file`, `documentType`) | — |
 | After login | `POST /documents` (`file`) | `GET /documents/:id` (metadata), `GET /documents/:id/content` (bytes) |
-| Admin review | — | `GET /admin/verification/documents/:documentId/content` |
+| Admin review | — | `GET /admin/verification/documents/:documentId/content` (org KYC **or** guardian cert `document.id`) |
 
 Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`. Max size: `DOCUMENT_MAX_BYTES` (default 10 MB).
 
@@ -138,9 +139,12 @@ Full step table: [onboarding.md](onboarding.md).
 | Create job | `POST /jobs` | Requires `canBookJobs`; auto-queues dispatch — see [job-dispatch-frontend.md](job-dispatch-frontend.md) |
 | Dispatch | `POST /jobs/:id/dispatch` | Optional retry / `DISPATCHING` status; finds eligible on-duty guardians |
 | Cancel | `PATCH /jobs/:id/cancel` | |
-| Mark complete (client) | `POST /jobs/:id/complete` | |
+| Mark complete (client) | `POST /jobs/:id/complete` | Required to issue invoice after guardian complete (`AWAITING_CONFIRMATION` → `COMPLETED`); idempotent if already completed |
 | Incidents | `GET/POST /jobs/:id/incidents` | |
-| Invoice for job | `GET /jobs/:id/invoice` | Before or after payment |
+| Invoice for job | `GET /jobs/:id/invoice` | `ClientInvoiceDetail`: `scheduledWindow`, `actual`, `billing`, `amounts`, `lineItems` — [invoice-detail.md](invoice-detail.md) |
+| Invoice detail | `GET /invoices/:id` | Same contract; first view moves `DRAFT` → `PENDING_CONFIRMATION` |
+| Org invoices | `GET /organizations/:id/invoices` | `ClientInvoiceSummary[]` for history list |
+| Dispute invoice | `POST /invoices/:id/dispute` | `billing:dispute`; blocks issue/payment until resolved |
 
 ### Payments
 
@@ -180,8 +184,8 @@ Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [
 | Bootstrap | — | `GET /users/me` | `guardianId`, roles |
 | Guardian profile | — | `GET /guardians/me`, `PATCH /guardians/me` | `GET /guardians/me` includes `shiftState` for current duty |
 | Certifications | — | `GET /guardians/me/certifications`, `GET /guardians/me/certifications/:certificationId` | Includes linked document metadata when present |
-| **Available** (on duty) | `AVAILABLE` | `POST /guardians/me/shift/start` | Eligibility checks (verified, certs, etc.) |
-| **Offline** (off duty) | `OFF_DUTY` | `POST /guardians/me/shift/end` | |
+| **Available** (on duty) | `AVAILABLE` | `POST /guardians/me/shift/start` | Also set automatically on guardian sign-in when off duty |
+| **Offline** (off duty) | `OFF_DUTY` | `POST /guardians/me/shift/end` | Stays offline until next sign-in or manual `shift/start` |
 | **Busy** (on assignment) | `BUSY` | — | Set by server; read via `GET /guardians/me` |
 | Location while on job | — | `POST /guardians/me/heartbeat` | Presence/location only; does not change duty state |
 
@@ -193,8 +197,8 @@ Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [
 | Accept / decline offer | `POST /assignments/:id/accept`, `.../decline` | `:id` is assignment id |
 | En route | `POST /assignments/:id/en-route` | |
 | On site | `POST /assignments/:id/on-site` | |
-| Complete (guardian) | `POST /assignments/:id/complete` | |
-| Client no-show | `POST /assignments/:id/no-show` | Body: `reason` |
+| Complete (guardian) | `POST /assignments/:id/complete` | Authoritative completion trigger; job → `COMPLETED`, invoice issued, `billing.invoiceIssued` email to org owners |
+| Client no-show | `POST /assignments/:id/no-show` | Body: `reasonCode` (required), `reasonNote` (optional). Allowed from `OFFERED`/`ACCEPTED`/`EN_ROUTE`; transitions job to `DISPATCHING` and re-queues dispatch |
 | Job detail (read) | `GET /jobs/:id` | Shared with client |
 
 Recommended guardian loop while on duty:
@@ -202,6 +206,85 @@ Recommended guardian loop while on duty:
 1. `GET /assignments/me` every few seconds when waiting for offers.
 2. After accept → `en-route` → `on-site` → `complete` as UX requires.
 3. `POST /guardians/me/heartbeat` on an interval during active assignment (exact interval is a product choice; server enforces eligibility).
+
+### Status synchronization contract
+
+Job and assignment statuses are related but not identical. The backend now enforces these synchronization rules:
+
+| Assignment transition | Job transition |
+|-----------------------|----------------|
+| `OFFERED -> ACCEPTED` | `PENDING`/`DISPATCHING` -> `ASSIGNED` |
+| `EN_ROUTE -> ON_SITE` | `ASSIGNED` -> `IN_PROGRESS` |
+| `ON_SITE -> COMPLETED` | `ASSIGNED`/`IN_PROGRESS` -> `COMPLETED` |
+| `OFFERED`/`ACCEPTED`/`EN_ROUTE` -> `NO_SHOW` | `ASSIGNED`/`IN_PROGRESS`/`DISPATCHING` -> `DISPATCHING` + `JOB_DISPATCH_REQUESTED` |
+
+### Automatic no-show policy
+
+The backend also applies system no-show transitions:
+
+- `ACCEPTED` assignments auto-transition to `NO_SHOW` after 20 minutes without `EN_ROUTE`.
+- `EN_ROUTE` assignments auto-transition to `NO_SHOW` after `scheduledStart + 15 minutes` without `ON_SITE`.
+- Automated transitions store trigger metadata as `SYSTEM`; manual endpoint transitions store `MANUAL`.
+
+Clients should treat `assignment` as the operational driver and `job` as the aggregate lifecycle status.
+
+### Analytics contract (client + guardian)
+
+Use the following event and KPI contract so mobile, backend, and ops dashboards report the same numbers.
+
+#### Canonical lifecycle events
+
+| Event name | Trigger source | Primary IDs | Notes |
+|------------|----------------|-------------|-------|
+| `job_created` | `POST /jobs` success | `jobId`, `organizationId` | Start of dispatch funnel denominator |
+| `job_dispatch_requested` | Auto-dispatch enqueue on create **or** `POST /jobs/:id/dispatch` | `jobId` | Keep `trigger = AUTO \| MANUAL` as an attribute |
+| `assignment_offered` | Assignment enters `OFFERED` | `assignmentId`, `jobId`, `guardianId` | Offer-level denominator metrics |
+| `assignment_accepted` | `POST /assignments/:id/accept` | `assignmentId`, `jobId`, `guardianId` | Job can transition to `ASSIGNED` |
+| `assignment_en_route` | `POST /assignments/:id/en-route` | `assignmentId`, `jobId` | Journey timing milestone |
+| `assignment_on_site` | `POST /assignments/:id/on-site` | `assignmentId`, `jobId` | Arrival timing milestone |
+| `assignment_early_release_requested` | `POST /assignments/:id/early-release` | `assignmentId`, `jobId` | Guardian requests early end |
+| `assignment_early_release_approved` | `POST /assignments/:id/early-release/approve` | `assignmentId`, `jobId` | Client approved early end |
+| `assignment_completed` | `POST /assignments/:id/complete` | `assignmentId`, `jobId` | Completion milestone; job → `AWAITING_CONFIRMATION` |
+| `assignment_no_show` | `POST /assignments/:id/no-show` or automation policy | `assignmentId`, `jobId`, `guardianId` | Include `trigger = MANUAL \| SYSTEM` |
+| `offer_expired` | Offer TTL elapsed (`EXPIRED`) | `assignmentId`, `jobId`, `guardianId` | Needed for offer conversion |
+| `job_terminal` | Job reaches `COMPLETED`, `FAILED`, or `CANCELLED` | `jobId`, `organizationId` | End of funnel |
+
+#### Required analytics attributes
+
+Include these attributes on every event when available:
+
+- `occurredAt` (UTC ISO timestamp), `jobId`, `assignmentId`, `organizationId`, `guardianId`
+- `district`, `jobType`, `priority`, `jobStatus`, `assignmentStatus`
+- `trigger` (`AUTO`, `MANUAL`, `SYSTEM`) for dispatch/no-show events
+- `sourceApp` (`client`, `guardian`, `admin`, `system`)
+
+#### KPI definitions (source of truth)
+
+| KPI | Formula | Interpretation |
+|-----|---------|----------------|
+| `dispatch_conversion_rate` | `jobs_with_accepted_offer / jobs_created` | Share of created jobs that reached accepted assignment |
+| `offer_acceptance_rate` | `accepted_offers / total_offers` | Guardian offer acceptance efficiency |
+| `offer_expiry_rate` | `expired_offers / total_offers` | Missed-offer pressure indicator |
+| `no_show_rate` | `no_show_assignments / accepted_assignments` | Operational reliability after acceptance |
+| `dispatch_failure_rate` | `jobs_failed / jobs_created` | Jobs ending without successful assignment |
+| `p50_time_to_first_offer` / `p95_time_to_first_offer` | `assignment_offered.occurredAt - job_created.occurredAt` | Dispatch responsiveness |
+| `p50_time_to_accept` / `p95_time_to_accept` | `assignment_accepted.occurredAt - assignment_offered.occurredAt` | Guardian response speed |
+| `p50_time_to_on_site` / `p95_time_to_on_site` | `assignment_on_site.occurredAt - assignment_accepted.occurredAt` | Travel/on-route performance |
+| `p50_time_to_complete` / `p95_time_to_complete` | `assignment_completed.occurredAt - assignment_accepted.occurredAt` | End-to-end execution duration |
+
+#### Slicing and dashboard rules
+
+- Required slices: `district`, `organizationId`, `jobType`, `priority`, weekday/hour bucket, guardian cohort.
+- Show funnel and latency KPIs in an ops view refreshed every 1-5 minutes.
+- For weekly trend views, aggregate by day/week and include both count and rate for each KPI.
+- Guardrail: suppress or flag slices with very low sample sizes (for example, `< 20` events) to avoid noisy comparisons.
+
+#### Data quality rules
+
+- Normalize all analytics timestamps to UTC; convert to local timezone only in UI.
+- Deduplicate lifecycle events by stable IDs and transition uniqueness (`assignmentId + status + occurredAt` windowing).
+- Keep no-show analytics split by trigger (`MANUAL` vs `SYSTEM`) to distinguish user-reported incidents from automation policy.
+- When computing job-level metrics, treat `assignment` transitions as operational truth and `job` transitions as aggregate lifecycle state.
 
 ---
 

@@ -31,6 +31,9 @@ Guide for running the G2 Sentry Guardian API locally.
 | OTP | `OTP_MAX_ATTEMPTS` | Brute-force limit for OTP verification |
 | SMS (Pindo) | `PINDO_ENABLED`, `PINDO_API_TOKEN`, `PINDO_SENDER` | Send OTP via [Pindo](https://pindo.io); required in production |
 | Dispatch | `DISPATCH_OFFER_TTL_MS` | How long guardian job offers remain valid (ms) |
+| Dispatch | `DISPATCH_WINDOW_MS` | Max time to search for a guardian before job `FAILED` (default 600000 ms) |
+| Billing | `BILLING_AUTO_CONFIRM_HOURS` | Hours before DRAFT invoice auto-issues if client does not confirm (default 24) |
+| Billing ops | `BILLING_OPS_EARLY_COMPLETION_MINUTES`, `BILLING_OPS_LATE_ARRIVAL_MINUTES`, `BILLING_OPS_SCAN_LOOKBACK_HOURS` | Anomaly scan thresholds — see [billing-overhaul-implementation.md](billing-overhaul-implementation.md) |
 | Documents | `DOCUMENT_MAX_BYTES` | Max upload size in bytes (default 10 MB); files stored in PostgreSQL |
 
 ## Database
@@ -42,9 +45,12 @@ npx prisma migrate deploy
 # Regenerate client after schema changes
 npx prisma generate
 
-# Load development seed data
+# Load development seed data (includes billing/dispute permissions)
 npm run db:seed:v1
+# alias: npm run db:seed
 ```
+
+After pulling billing changes, ensure all three migrations under `prisma/migrations/20260603*` are applied. See [billing-overhaul-implementation.md](billing-overhaul-implementation.md).
 
 For a **fresh disposable database** during development:
 

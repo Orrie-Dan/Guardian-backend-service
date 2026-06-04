@@ -2,6 +2,8 @@
 
 All routes remain under `/api/v1`.
 
+> **Billing phases 1–6:** deploy checklist, flows, and frontend integration → [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md)
+
 ## Registration v2 (breaking)
 
 **Removed** monolithic registration:
@@ -77,6 +79,71 @@ API unchanged. Documentation: [admin-onboarding.md](admin-onboarding.md) (reques
 - ETA is straight-line (haversine), not turn-by-turn routing.
 
 Docs: [jobs.md](jobs.md), [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md), [job-dispatch-frontend.md](job-dispatch-frontend.md) §4.3.1.
+
+## Early release workflow (added)
+
+| Method | Path | Permission |
+|--------|------|------------|
+| POST | `/assignments/:id/early-release` | `assignments:early_release` |
+| POST | `/assignments/:id/early-release/approve` | `assignments:early_release_approve` |
+| POST | `/assignments/:id/early-release/reject` | `assignments:early_release_reject` |
+
+New assignment status: `EARLY_RELEASE_REQUESTED`. Docs: [early-release.md](early-release.md). Migration: `20260603140000_early_release_workflow`. Re-run `npm run db:seed` for permissions.
+
+## Admin billing policies (added)
+
+| Method | Path | Permission |
+|--------|------|------------|
+| GET | `/admin/billing-policies` | `admin:billing:read` |
+| POST | `/admin/billing-policies` | `admin:billing:write` |
+| PATCH | `/admin/billing-policies/:id` | `admin:billing:write` |
+
+Docs: [admin-billing-policies.md](admin-billing-policies.md). Re-run `npm run db:seed:v1` after deploy for new permissions.
+
+## Invoice dispute lifecycle (added)
+
+| Change | Detail |
+|--------|--------|
+| Invoice statuses | `PENDING_CONFIRMATION`, `DISPUTED` |
+| Client view | `GET /invoices/:id` moves `DRAFT` → `PENDING_CONFIRMATION` |
+| Dispute | `POST /invoices/:id/dispute` (`billing:dispute`) |
+| Admin resolve | `POST /admin/invoices/:id/resolve-dispute` (`admin:invoices:resolve_dispute`) — `CLEAR` or `VOID` |
+| Void | `POST /invoices/:id/void` requires `voidReason`; optional `replacementInvoiceId` |
+| Guards | Issue and payment blocked while `DISPUTED` |
+| Email | `billing.invoiceDisputed`, `billing.invoiceDisputeResolved` |
+
+Docs: [invoice-disputes.md](invoice-disputes.md). Re-run `npm run db:seed` after deploy.
+
+## Billing ops observability (added)
+
+| Change | Detail |
+|--------|--------|
+| Scheduled scan | Early completion (>30m before `scheduledEnd`) and late arrival (>15m after `scheduledStart`) → audit `billing.ops_alert` |
+| Reconciliation | `GET /admin/billing/reconciliation?from&to` with org/guardian filters |
+| Env | `BILLING_OPS_EARLY_COMPLETION_MINUTES`, `BILLING_OPS_LATE_ARRIVAL_MINUTES`, `BILLING_OPS_SCAN_LOOKBACK_HOURS` |
+
+Docs: [admin-billing-ops.md](admin-billing-ops.md).
+
+## Client invoice transparency contract (breaking for invoice JSON)
+
+| Change | Detail |
+|--------|--------|
+| Detail endpoints | `GET /jobs/:id/invoice` and `GET /invoices/:id` return `ClientInvoiceDetail` (not raw DB row) |
+| Org list | `GET /organizations/:id/invoices` returns `ClientInvoiceSummary[]` |
+| Shape | `scheduledWindow`, `actual`, `billing`, `amounts`, `lineItems`, optional `dispute` / `void` / `payments` |
+| Swagger | `ClientInvoiceDetailDto` |
+
+Docs: [invoice-detail.md](invoice-detail.md). Update client parsers — flat `subtotal` / `billableHours` top-level fields removed from detail response.
+
+## Billing confirmation (breaking for clients polling job status)
+
+| Change | Detail |
+|--------|--------|
+| New job status | `AWAITING_CONFIRMATION` after guardian `POST /assignments/:id/complete` |
+| Invoice timing | DRAFT on guardian complete; **ISSUED** only after `POST /jobs/:id/complete` or auto-confirm (`BILLING_AUTO_CONFIRM_HOURS`, default 24) |
+| Billable hours | Default policy `MINIMUM_GUARANTEED`: `max(minimumHours, min(scheduled, actual))` from assignment `arrivedAt` → `completedAt` |
+| Invoice fields | `scheduledHours`, `actualHours`, `billableHours`, `billingBasis`, `lineItems` on `GET /jobs/:id/invoice` |
+| Email | `billing.invoiceAwaitingConfirmation` on DRAFT; `billing.invoiceIssued` on issue |
 
 ## Route migrations (dispatch / assignments)
 
