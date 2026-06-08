@@ -116,6 +116,21 @@ export class GuardianDispatchEligibilityService {
     return [...(await this.getTriedGuardianIds(jobId, tx))];
   }
 
+  async getReplacementExcludedGuardianIds(
+    jobId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string[]> {
+    const db = tx ?? this.prisma;
+    const assignments = await db.jobAssignment.findMany({
+      where: {
+        jobId,
+        status: { notIn: TERMINAL_ASSIGNMENT_STATUSES },
+      },
+      select: { guardianId: true },
+    });
+    return [...new Set(assignments.map((a) => a.guardianId))];
+  }
+
   async hasActiveOffer(jobId: string, tx?: Prisma.TransactionClient): Promise<boolean> {
     const db = tx ?? this.prisma;
     const active = await db.jobAssignment.findFirst({
@@ -137,6 +152,7 @@ export class GuardianDispatchEligibilityService {
     district: string,
     jobId: string,
     tx: Prisma.TransactionClient,
+    options?: { replacement?: boolean },
   ): Promise<{
     guardian: GuardianRow | null;
     excludedCount: number;
@@ -146,7 +162,9 @@ export class GuardianDispatchEligibilityService {
     eligibleIds: string[];
     reachableIds: string[];
   }> {
-    const excludedGuardianIds = await this.getExcludedGuardianIds(jobId, tx);
+    const excludedGuardianIds = options?.replacement
+      ? await this.getReplacementExcludedGuardianIds(jobId, tx)
+      : await this.getExcludedGuardianIds(jobId, tx);
     const candidates = await this.listEligibleGuardianIds(
       district,
       DISPATCH_POOL_SIZE,

@@ -8,6 +8,13 @@ const ACTIVE_ASSIGNMENT_STATUSES = new Set<AssignmentStatus>([
   AssignmentStatus.EN_ROUTE,
   AssignmentStatus.ON_SITE,
   AssignmentStatus.EARLY_RELEASE_REQUESTED,
+  AssignmentStatus.REPLACEMENT_REQUESTED,
+]);
+
+const REPLACEMENT_PIPELINE_STATUSES = new Set<AssignmentStatus>([
+  AssignmentStatus.OFFERED,
+  AssignmentStatus.ACCEPTED,
+  AssignmentStatus.EN_ROUTE,
 ]);
 
 @Injectable()
@@ -48,6 +55,7 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
             in: [
               JobStatus.ASSIGNED,
               JobStatus.IN_PROGRESS,
+              JobStatus.SEEKING_REPLACEMENT,
               JobStatus.COMPLETED,
               JobStatus.DISPATCHING,
             ],
@@ -78,6 +86,13 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
         }
         if (job.status === JobStatus.DISPATCHING) {
           return statuses.includes(AssignmentStatus.ON_SITE);
+        }
+        if (job.status === JobStatus.SEEKING_REPLACEMENT) {
+          const hasOnSiteOriginal = statuses.includes(AssignmentStatus.ON_SITE);
+          const hasReplacementPipeline = statuses.some((status) =>
+            REPLACEMENT_PIPELINE_STATUSES.has(status),
+          );
+          return !hasOnSiteOriginal && !hasReplacementPipeline;
         }
         return false;
       });

@@ -80,6 +80,17 @@ API unchanged. Documentation: [admin-onboarding.md](admin-onboarding.md) (reques
 
 Docs: [jobs.md](jobs.md), [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md), [job-dispatch-frontend.md](job-dispatch-frontend.md) §4.3.1.
 
+## Replacement handoff workflow (added)
+
+| Method | Path | Permission |
+|--------|------|------------|
+| POST | `/assignments/:id/replacement-request` | `assignments:replacement_request` |
+| GET | `/admin/assignments/replacement-requests` | `admin:assignments:replacement` |
+| POST | `/admin/assignments/:id/replacement/approve` | `admin:assignments:replacement` |
+| POST | `/admin/assignments/:id/replacement/deny` | `admin:assignments:replacement` |
+
+New assignment status: `REPLACEMENT_REQUESTED`. New job status: `SEEKING_REPLACEMENT`. Docs: [replacement.md](replacement.md). Migration: `20260605120000_replacement_handoff`. Re-run `npm run db:seed` for permissions.
+
 ## Early release workflow (added)
 
 | Method | Path | Permission |

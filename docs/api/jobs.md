@@ -173,6 +173,7 @@ Not under `/jobs` — controller prefix **`/assignments`**:
 | POST | `/assignments/:id/decline` | `assignments:decline` |
 | POST | `/assignments/:id/en-route` | `assignments:en_route` |
 | POST | `/assignments/:id/on-site` | `assignments:on_site` |
+| POST | `/assignments/:id/replacement-request` | `assignments:replacement_request` | Guardian requests replacement (see [replacement.md](replacement.md)) |
 | POST | `/assignments/:id/early-release` | `assignments:early_release` | Guardian requests early end (see [early-release.md](early-release.md)) |
 | POST | `/assignments/:id/early-release/approve` | `assignments:early_release_approve` | Client approves early release |
 | POST | `/assignments/:id/early-release/reject` | `assignments:early_release_reject` | Client rejects; assignment returns `ON_SITE` |

@@ -48,6 +48,7 @@ export type InvoiceAmountsInput = {
   policy: Pick<BillingPolicy, 'model' | 'minimumHours' | 'prorationEnabled'>;
   pricingModel: PricingModel;
   hourlyRate: Prisma.Decimal | null;
+  replacementHandoff?: boolean;
   flatFee: Prisma.Decimal | null;
 };
 
@@ -138,7 +139,15 @@ export class BillingCalculationService {
   }
 
   computeInvoiceAmounts(input: InvoiceAmountsInput): InvoiceAmountsResult {
-    const { job, assignment, policy, pricingModel, hourlyRate, flatFee } = input;
+    const {
+      job,
+      assignment,
+      policy,
+      pricingModel,
+      hourlyRate,
+      flatFee,
+      replacementHandoff,
+    } = input;
 
     if (!assignment.arrivedAt || !assignment.completedAt) {
       throw new BadRequestException(
@@ -197,6 +206,15 @@ export class BillingCalculationService {
               code: 'early_release',
               label: 'Early release',
               quantity: assignment.earlyReleaseResolution ?? 'APPROVED',
+            },
+          ]
+        : []),
+      ...(replacementHandoff
+        ? [
+            {
+              code: 'replacement_handoff',
+              label: 'Replacement handoff',
+              quantity: 'Continuous coverage',
             },
           ]
         : []),

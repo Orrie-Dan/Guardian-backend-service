@@ -25,7 +25,7 @@ describe('BillingService', () => {
       update: jest.fn(),
     },
     job: { findUnique: jest.fn() },
-    jobAssignment: { findFirst: jest.fn() },
+    jobAssignment: { findFirst: jest.fn(), findMany: jest.fn() },
     pricingRule: {
       findMany: jest.fn().mockResolvedValue([
         {
@@ -90,10 +90,12 @@ describe('BillingService', () => {
         location: { district: 'Gasabo' },
       };
       prisma.invoice.findUnique.mockResolvedValue(null);
-      prisma.jobAssignment.findFirst.mockResolvedValue({
-        arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
-        completedAt: new Date('2026-06-01T11:00:00.000Z'),
-      });
+      prisma.jobAssignment.findMany.mockResolvedValue([
+        {
+          arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
+          completedAt: new Date('2026-06-01T11:00:00.000Z'),
+        },
+      ]);
       calculation.resolveBillingPolicy.mockResolvedValue({
         model: BillingPolicyModel.MINIMUM_GUARANTEED,
         minimumHours: new Prisma.Decimal(2),

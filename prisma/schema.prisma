@@ -555,6 +555,7 @@ enum JobStatus {
   DISPATCHING
   ASSIGNED
   IN_PROGRESS
+  SEEKING_REPLACEMENT
   AWAITING_CONFIRMATION
   COMPLETED
   FAILED
@@ -571,9 +572,17 @@ enum AssignmentStatus {
   EN_ROUTE
   ON_SITE
   EARLY_RELEASE_REQUESTED
+  REPLACEMENT_REQUESTED
   COMPLETED
   NO_SHOW
   CANCELLED
+
+  @@schema("job")
+}
+
+enum ReplacementResolution {
+  APPROVED
+  DENIED
 
   @@schema("job")
 }
@@ -643,6 +652,7 @@ model Job {
   billingProrationEnabled                 Boolean?            @map("billing_proration_enabled")
   billingEarlyReleaseRequiresClientApproval Boolean?          @map("billing_early_release_requires_client_approval")
   billingAutoApproveAfterMinutes          Int?                @map("billing_auto_approve_after_minutes") @db.SmallInt
+  replacementDepartingAssignmentId        String?             @map("replacement_departing_assignment_id") @db.Uuid
   createdAt              DateTime            @default(now()) @map("created_at")
   updatedAt              DateTime            @updatedAt @map("updated_at")
 
@@ -699,10 +709,18 @@ model JobAssignment {
   earlyReleaseResolvedAt    DateTime?               @map("early_release_resolved_at")
   earlyReleaseResolution    EarlyReleaseResolution? @map("early_release_resolution")
   earlyReleaseAutoApproveAt DateTime?               @map("early_release_auto_approve_at")
+  replacementRequestedAt    DateTime?               @map("replacement_requested_at")
+  replacementReason         String?                 @map("replacement_reason") @db.VarChar(500)
+  replacementResolvedAt     DateTime?               @map("replacement_resolved_at")
+  replacementResolution     ReplacementResolution?  @map("replacement_resolution")
+  replacementResolvedByUserId String?               @map("replacement_resolved_by_user_id") @db.Uuid
+  replacesAssignmentId      String?                 @map("replaces_assignment_id") @db.Uuid
 
-  job       Job            @relation(fields: [jobId], references: [id])
-  guardian  Guardian       @relation(fields: [guardianId], references: [id])
-  incidents FieldIncident[]
+  job                 Job              @relation(fields: [jobId], references: [id])
+  guardian            Guardian         @relation(fields: [guardianId], references: [id])
+  replacesAssignment  JobAssignment?   @relation("AssignmentReplacement", fields: [replacesAssignmentId], references: [id])
+  replacedByAssignments JobAssignment[] @relation("AssignmentReplacement")
+  incidents           FieldIncident[]
 
   @@unique([jobId, guardianId, assignmentRound])
   @@index([jobId, status])
@@ -711,6 +729,7 @@ model JobAssignment {
   @@index([status, acceptedAt])
   @@index([status, noShowAt])
   @@index([status, earlyReleaseAutoApproveAt])
+  @@index([status, replacementRequestedAt])
   @@map("job_assignments")
   @@schema("job")
 }

@@ -106,6 +106,35 @@ export class DispatchingService implements OnModuleInit {
     return { jobId, queued: true };
   }
 
+  async requestReplacementDispatch(
+    jobId: string,
+  ): Promise<{ jobId: string; queued: boolean }> {
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+    if (job.status !== JobStatus.SEEKING_REPLACEMENT) {
+      throw new BadRequestException(
+        `Replacement dispatch requires job status ${JobStatus.SEEKING_REPLACEMENT}`,
+      );
+    }
+
+    await this.outbox.enqueue({
+      aggregateType: 'job',
+      aggregateId: jobId,
+      eventType: 'JOB_DISPATCH_REQUESTED',
+      payload: { jobId, replacement: true },
+    });
+
+    await this.audit.log({
+      action: 'REPLACEMENT_DISPATCH_REQUESTED',
+      entityType: 'job.jobs',
+      entityId: jobId,
+    });
+
+    return { jobId, queued: true };
+  }
+
   async processDispatch(jobId: string): Promise<void> {
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
@@ -123,22 +152,24 @@ export class DispatchingService implements OnModuleInit {
       return;
     }
 
+    const isReplacementDispatch = job.status === JobStatus.SEEKING_REPLACEMENT;
+
     await this.ensureDispatchSchedule(jobId, job.dispatchDeadlineAt, job.dispatchStartedAt);
     if (!job.dispatchDeadlineAt) {
       job.dispatchDeadlineAt = new Date(Date.now() + DISPATCH_WINDOW_MS);
     }
 
-    if (await this.evaluateTerminalFailures(job)) {
+    if (!isReplacementDispatch && (await this.evaluateTerminalFailures(job))) {
       return;
     }
 
-    if (job.offersSentCount >= MAX_OFFERS_PER_JOB) {
+    if (!isReplacementDispatch && job.offersSentCount >= MAX_OFFERS_PER_JOB) {
       await this.failJob(job, 'dispatch_max_offers_exceeded');
       return;
     }
 
     const district = job.location.district;
-    const isUrgent = job.priority === JobPriority.URGENT;
+    const isUrgent = !isReplacementDispatch && job.priority === JobPriority.URGENT;
 
     if (isUrgent) {
       await this.processUrgentParallelDispatch(jobId, job, district);
@@ -146,7 +177,9 @@ export class DispatchingService implements OnModuleInit {
     }
 
     const dispatchResult = await this.prisma.$transaction(async (tx) => {
-      const pick = await this.eligibility.pickNextReachableGuardian(district, jobId, tx);
+      const pick = await this.eligibility.pickNextReachableGuardian(district, jobId, tx, {
+        replacement: isReplacementDispatch,
+      });
       if (!pick.guardian) {
         return {
           assignments: [] as { id: string; guardianId: string; expiresAt: Date }[],
@@ -196,6 +229,7 @@ export class DispatchingService implements OnModuleInit {
         tx,
         jobId,
         pick.guardian.id,
+        isReplacementDispatch ? job.replacementDepartingAssignmentId : null,
       );
       return { assignments: [created], anomaly: undefined, pick };
     });
@@ -210,7 +244,11 @@ export class DispatchingService implements OnModuleInit {
         dispatchResult.pick.eligibleIds.length,
         dispatchResult.pick.reachableCount,
       );
-      await this.handleDispatchFailure(jobId);
+      if (isReplacementDispatch) {
+        await this.handleReplacementDispatchFailure(jobId);
+      } else {
+        await this.handleDispatchFailure(jobId);
+      }
       return;
     }
 
@@ -285,6 +323,7 @@ export class DispatchingService implements OnModuleInit {
     tx: Prisma.TransactionClient,
     jobId: string,
     guardianId: string,
+    replacesAssignmentId?: string | null,
   ) {
     const round = (await tx.jobAssignment.count({ where: { jobId } })) + 1;
     const expiresAt = new Date(Date.now() + OFFER_TTL_MS);
@@ -296,6 +335,7 @@ export class DispatchingService implements OnModuleInit {
         assignmentRound: round,
         status: AssignmentStatus.OFFERED,
         expiresAt,
+        replacesAssignmentId: replacesAssignmentId ?? undefined,
       },
     });
 
@@ -660,6 +700,28 @@ export class DispatchingService implements OnModuleInit {
     }
   }
 
+  private async handleReplacementDispatchFailure(jobId: string): Promise<void> {
+    this.logger.warn(`Replacement dispatch could not find a candidate for job ${jobId}`);
+    await this.audit.log({
+      action: 'REPLACEMENT_DISPATCH_SOFT_FAIL',
+      entityType: 'job.jobs',
+      entityId: jobId,
+    });
+
+    const baseMs = 5_000;
+    const maxMs = 60_000;
+    const job = await this.prisma.job.findUnique({ where: { id: jobId } });
+    const delayMs = Math.min(baseMs * 2 ** Math.max(job?.offersSentCount ?? 0, 0), maxMs);
+
+    await this.outbox.enqueue({
+      aggregateType: 'job',
+      aggregateId: jobId,
+      eventType: 'JOB_DISPATCH_REQUESTED',
+      payload: { jobId, replacement: true },
+      scheduledAt: new Date(Date.now() + delayMs),
+    });
+  }
+
   private async handleDispatchFailure(jobId: string): Promise<void> {
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
@@ -717,7 +779,9 @@ export class DispatchingService implements OnModuleInit {
         data: { shiftStatus: ShiftStatus.BUSY, availableForJobs: false },
       });
 
-      await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
+      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
+        await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
+      }
 
       competingOffers = await cancelCompetingOffersInTransaction(
         tx,
@@ -818,16 +882,24 @@ export class DispatchingService implements OnModuleInit {
 
     if (
       job &&
-      (job.status === JobStatus.PENDING || job.status === JobStatus.DISPATCHING)
+      (job.status === JobStatus.PENDING ||
+        job.status === JobStatus.DISPATCHING ||
+        job.status === JobStatus.SEEKING_REPLACEMENT)
     ) {
-      if (await this.evaluateTerminalFailures(job)) {
+      if (
+        job.status !== JobStatus.SEEKING_REPLACEMENT &&
+        (await this.evaluateTerminalFailures(job))
+      ) {
         return;
       }
       await this.outbox.enqueue({
         aggregateType: 'job',
         aggregateId: assignment.jobId,
         eventType: 'JOB_DISPATCH_REQUESTED',
-        payload: { jobId: assignment.jobId },
+        payload: {
+          jobId: assignment.jobId,
+          replacement: job.status === JobStatus.SEEKING_REPLACEMENT,
+        },
       });
     }
   }

@@ -3,6 +3,7 @@ import { BillingModule } from '../billing/billing.module';
 import { GuardiansModule } from '../guardians/guardians.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DispatchingModule } from '../dispatching/dispatching.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { QueueModule } from '../queue/queue.module';
 import { AssignmentsController } from './assignments.controller';
@@ -18,6 +19,7 @@ import { NoShowAutomationService } from './no-show-automation.service';
     QueueModule,
     GuardiansModule,
     forwardRef(() => JobsModule),
+    forwardRef(() => DispatchingModule),
   ],
 
   controllers: [AssignmentsController],

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OrgMemberRole } from '@prisma/client';
+import { OrgMemberRole, RoleCode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailTemplateId, EmailTemplatePayload } from './email-template.ids';
 import { renderEmailTemplate } from './email-template.registry';
@@ -109,6 +109,36 @@ export class EmailNotificationService {
             ...payload,
           },
           { ...context, userId: membership.user.id },
+        ),
+      );
+    }
+    return results;
+  }
+
+  async sendToOpsAdmins(
+    templateId: EmailTemplateId,
+    payload: EmailTemplatePayload,
+    context?: EmailSendContext,
+  ): Promise<EmailSendResult[]> {
+    const opsUsers = await this.prisma.user.findMany({
+      where: {
+        userRoles: {
+          some: {
+            role: { code: { in: [RoleCode.OPS_ADMIN, RoleCode.SUPER_ADMIN] } },
+          },
+        },
+      },
+      select: { id: true, email: true, fullName: true },
+    });
+
+    const results: EmailSendResult[] = [];
+    for (const user of opsUsers) {
+      results.push(
+        await this.sendBestEffort(
+          user.email,
+          templateId,
+          { fullName: user.fullName ?? undefined, ...payload },
+          { ...context, userId: user.id },
         ),
       );
     }

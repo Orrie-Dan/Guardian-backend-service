@@ -162,6 +162,32 @@ export function renderEmailTemplate(
         ],
       });
 
+    case EmailTemplateId.ASSIGNMENT_REPLACEMENT_REQUESTED:
+      return buildRenderedEmail(`Replacement requested — job ${jobRef}`, {
+        greetingName: name,
+        paragraphs: [
+          `A guardian on job ${jobRef} has requested a replacement.`,
+          'Review and approve or deny in the admin console.',
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Reason', value: String(payload.reason ?? '—') },
+        ],
+      });
+
+    case EmailTemplateId.ASSIGNMENT_REPLACEMENT_COMPLETED:
+      return buildRenderedEmail(`Officer replaced — job ${jobRef}`, {
+        greetingName: name,
+        paragraphs: [
+          `Coverage for job ${jobRef} at ${orgName} has been transferred to a replacement officer.`,
+          'The new officer is on site. Tracking remains available in your app.',
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Replacement officer', value: String(payload.guardianName ?? '—') },
+        ],
+      });
+
     case EmailTemplateId.DISPATCH_OFFER_RECEIVED:
       return buildRenderedEmail(`New assignment offer — job ${jobRef}`, {
         greetingName: name,

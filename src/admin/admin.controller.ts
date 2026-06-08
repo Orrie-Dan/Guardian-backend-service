@@ -57,6 +57,8 @@ import { GuardianLocationService } from '../guardians/guardian-location.service'
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
+import { AdminReplacementService } from './admin-replacement.service';
+import { ReplacementDenyDto } from '../assignments/dto/replacement.dto';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -77,7 +79,33 @@ export class AdminController {
     private readonly billingOps: BillingOpsService,
     private readonly prisma: PrismaService,
     private readonly dispatching: DispatchingService,
+    private readonly replacement: AdminReplacementService,
   ) {}
+
+  @Get('assignments/replacement-requests')
+  @RequirePermissions('admin:assignments:replacement')
+  listReplacementRequests() {
+    return this.replacement.listPendingRequests();
+  }
+
+  @Post('assignments/:id/replacement/approve')
+  @RequirePermissions('admin:assignments:replacement')
+  approveReplacement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.replacement.approve(id, user.sub);
+  }
+
+  @Post('assignments/:id/replacement/deny')
+  @RequirePermissions('admin:assignments:replacement')
+  denyReplacement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReplacementDenyDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.replacement.deny(id, user.sub, dto.note);
+  }
 
   @Get('jobs/:id/dispatch-debug')
   @RequirePermissions('admin:analytics:read')

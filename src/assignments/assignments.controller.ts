@@ -13,6 +13,7 @@ import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { AssignmentsService } from './assignments.service';
 import { EarlyReleaseRejectDto, EarlyReleaseRequestDto } from './dto/early-release.dto';
 import { NoShowDto } from './dto/no-show.dto';
+import { ReplacementRequestDto } from './dto/replacement.dto';
 
 @ApiTags('assignments')
 @ApiBearerAuth()
@@ -61,6 +62,16 @@ export class AssignmentsController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.assignments.onSite(id, user.guardianId!);
+  }
+
+  @Post(':id/replacement-request')
+  @RequirePermissions('assignments:replacement_request')
+  requestReplacement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReplacementRequestDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.assignments.requestReplacement(id, user.guardianId!, dto.reason);
   }
 
   @Post(':id/early-release')

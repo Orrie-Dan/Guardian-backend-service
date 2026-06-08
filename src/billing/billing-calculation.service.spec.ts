@@ -99,6 +99,37 @@ describe('BillingCalculationService', () => {
   });
 
   describe('computeInvoiceAmounts', () => {
+    it('includes replacement handoff line item when coverage spans officers', () => {
+      const result = service.computeInvoiceAmounts({
+        job: {
+          scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
+          scheduledEnd: new Date('2026-06-01T16:00:00.000Z'),
+          requestedGuardianCount: 1,
+          billingPolicyModel: BillingPolicyModel.ACTUAL_TIME,
+          billingMinimumHours: new Prisma.Decimal(2),
+          billingProrationEnabled: true,
+        },
+        assignment: {
+          arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
+          completedAt: new Date('2026-06-01T16:00:00.000Z'),
+          earlyReleaseResolution: null,
+        },
+        policy: {
+          model: BillingPolicyModel.ACTUAL_TIME,
+          minimumHours: new Prisma.Decimal(2),
+          prorationEnabled: true,
+        },
+        pricingModel: PricingModel.HOURLY,
+        hourlyRate: new Prisma.Decimal(1000),
+        flatFee: null,
+        replacementHandoff: true,
+      });
+
+      expect(result.lineItems.some((item) => item.code === 'replacement_handoff')).toBe(
+        true,
+      );
+    });
+
     it('prorates BOOKED_BLOCK to actual hours when early release approved', () => {
       const result = service.computeInvoiceAmounts({
         job: {

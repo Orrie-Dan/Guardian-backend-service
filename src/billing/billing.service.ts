@@ -115,13 +115,23 @@ export class BillingService {
       return existing;
     }
 
-    const assignment = await this.prisma.jobAssignment.findFirst({
-      where: { jobId: job.id, status: AssignmentStatus.COMPLETED },
-      orderBy: { completedAt: 'desc' },
+    const completedAssignments = await this.prisma.jobAssignment.findMany({
+      where: {
+        jobId: job.id,
+        status: AssignmentStatus.COMPLETED,
+        arrivedAt: { not: null },
+        completedAt: { not: null },
+      },
+      orderBy: { arrivedAt: 'asc' },
     });
-    if (!assignment) {
+    if (!completedAssignments.length) {
       throw new NotFoundException('No completed assignment for job');
     }
+
+    const primaryAssignment = completedAssignments[completedAssignments.length - 1];
+    const coverageArrivedAt = completedAssignments[0].arrivedAt!;
+    const coverageCompletedAt = primaryAssignment.completedAt!;
+    const replacementHandoff = completedAssignments.length > 1;
 
     const rule = await this.resolvePrice(
       job.organizationId,
@@ -138,11 +148,16 @@ export class BillingService {
 
     const amounts = this.calculation.computeInvoiceAmounts({
       job,
-      assignment,
+      assignment: {
+        ...primaryAssignment,
+        arrivedAt: coverageArrivedAt,
+        completedAt: coverageCompletedAt,
+      },
       policy: billingPolicy,
       pricingModel: rule.pricingModel,
       hourlyRate: rule.hourlyRate,
       flatFee: rule.flatFee,
+      replacementHandoff,
     });
 
     const taxAmount = amounts.subtotal.mul(0.18);
@@ -159,8 +174,8 @@ export class BillingService {
         status: InvoiceStatus.DRAFT,
         scheduledStartAt: job.scheduledStart,
         scheduledEndAt: job.scheduledEnd,
-        arrivedAt: assignment.arrivedAt,
-        completedAt: assignment.completedAt,
+        arrivedAt: coverageArrivedAt,
+        completedAt: coverageCompletedAt,
         scheduledHours: new Prisma.Decimal(amounts.scheduledHours),
         actualHours: new Prisma.Decimal(amounts.actualHours),
         billableHours: new Prisma.Decimal(amounts.billableHours),

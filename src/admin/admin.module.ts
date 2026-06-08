@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { DocumentsModule } from '../documents/documents.module';
@@ -15,6 +15,8 @@ import { AdminUsersService } from './admin-users.service';
 import { AdminBillingPoliciesService } from './admin-billing-policies.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminVerificationService } from './admin-verification.service';
+import { AdminReplacementService } from './admin-replacement.service';
+import { AssignmentsModule } from '../assignments/assignments.module';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { AdminVerificationService } from './admin-verification.service';
     NotificationsModule,
     AnalyticsModule,
     DispatchingModule,
+    forwardRef(() => AssignmentsModule),
   ],
   controllers: [AdminController],
   providers: [
@@ -36,6 +39,7 @@ import { AdminVerificationService } from './admin-verification.service';
     AdminBillingPoliciesService,
     AdminAuditService,
     AdminAnalyticsService,
+    AdminReplacementService,
   ],
 })
 export class AdminModule {}

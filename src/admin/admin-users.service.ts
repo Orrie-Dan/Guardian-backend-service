@@ -57,6 +57,7 @@ const ACTIVE_JOB_STATUSES: JobStatus[] = [
   JobStatus.DISPATCHING,
   JobStatus.ASSIGNED,
   JobStatus.IN_PROGRESS,
+  JobStatus.SEEKING_REPLACEMENT,
 ];
 
 const ACTIVE_ASSIGNMENT_STATUSES: AssignmentStatus[] = [

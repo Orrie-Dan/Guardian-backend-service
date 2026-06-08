@@ -46,6 +46,36 @@ export class JobLifecycleService {
     );
   }
 
+  transitionToSeekingReplacement(
+    tx: Prisma.TransactionClient,
+    jobId: string,
+    changedBy?: string,
+  ) {
+    return this.transitionJobStatus(
+      tx,
+      jobId,
+      JobStatus.SEEKING_REPLACEMENT,
+      [JobStatus.IN_PROGRESS],
+      changedBy,
+      'replacement_approved',
+    );
+  }
+
+  transitionFromSeekingReplacementToInProgress(
+    tx: Prisma.TransactionClient,
+    jobId: string,
+    changedBy?: string,
+  ) {
+    return this.transitionJobStatus(
+      tx,
+      jobId,
+      JobStatus.IN_PROGRESS,
+      [JobStatus.SEEKING_REPLACEMENT],
+      changedBy,
+      'replacement_handoff_completed',
+    );
+  }
+
   async completeFromAssignment(jobId: string, changedBy?: string) {
     await this.prisma.$transaction((tx) =>
       this.transitionJobStatus(

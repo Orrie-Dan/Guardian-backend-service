@@ -1,13 +1,18 @@
 import {
   BadRequestException,
   ConflictException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import {
   AssignmentStatus,
   EarlyReleaseResolution,
+  JobStatus,
+  OrgMemberRole,
   Prisma,
+  ReplacementResolution,
   RoleCode,
   ShiftStatus,
 } from '@prisma/client';
@@ -16,11 +21,14 @@ import { BillingService } from '../billing/billing.service';
 import { AuditService } from '../common/services/audit.service';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { ShiftStateService } from '../guardians/shift-state.service';
+import { DispatchingService } from '../dispatching/dispatching.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
 import { isEarlyReleaseApproved } from './early-release.util';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { DISPATCH_WINDOW_MS } from '../queue/queue.constants';
 import { QueueService } from '../queue/queue.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -57,6 +65,9 @@ export class AssignmentsService {
     private readonly queue: QueueService,
     private readonly policy: ResourceOwnerPolicy,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
+    @Inject(forwardRef(() => DispatchingService))
+    private readonly dispatching: DispatchingService,
   ) {}
 
   async findForGuardian(guardianId: string) {
@@ -81,6 +92,7 @@ export class AssignmentsService {
             AssignmentStatus.EN_ROUTE,
             AssignmentStatus.ON_SITE,
             AssignmentStatus.EARLY_RELEASE_REQUESTED,
+            AssignmentStatus.REPLACEMENT_REQUESTED,
           ],
         },
       },
@@ -121,7 +133,9 @@ export class AssignmentsService {
         data: { shiftStatus: ShiftStatus.BUSY, availableForJobs: false },
       });
 
-      await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
+      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
+        await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
+      }
 
       competingOffers = await cancelCompetingOffersInTransaction(
         tx,
@@ -185,12 +199,20 @@ export class AssignmentsService {
   async onSite(assignmentId: string, guardianId: string) {
     const assignment = await this.prisma.jobAssignment.findUnique({
       where: { id: assignmentId },
+      include: { job: true },
     });
     if (!assignment || assignment.guardianId !== guardianId) {
       throw new NotFoundException('Assignment not found');
     }
     if (assignment.status !== AssignmentStatus.EN_ROUTE) {
       throw new BadRequestException(`Expected status ${AssignmentStatus.EN_ROUTE}`);
+    }
+
+    if (
+      assignment.replacesAssignmentId &&
+      assignment.job.status === JobStatus.SEEKING_REPLACEMENT
+    ) {
+      return this.executeReplacementHandoff(assignmentId, assignment);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -228,6 +250,9 @@ export class AssignmentsService {
     }
     if (assignment.status !== AssignmentStatus.ON_SITE) {
       throw new BadRequestException('Early release can only be requested while on site');
+    }
+    if (assignment.replacementRequestedAt && !assignment.replacementResolution) {
+      throw new BadRequestException('Cannot request early release while replacement is pending');
     }
     if (!assignment.job.billingAllowEarlyRelease) {
       throw new BadRequestException('Early release is not allowed for this job');
@@ -395,12 +420,345 @@ export class AssignmentsService {
     return updated;
   }
 
-  async complete(assignmentId: string, guardianId: string, actorUserId: string) {
+  async requestReplacement(
+    assignmentId: string,
+    guardianId: string,
+    reason: string,
+  ) {
     const assignment = await this.prisma.jobAssignment.findUnique({
       where: { id: assignmentId },
+      include: { job: true },
     });
     if (!assignment || assignment.guardianId !== guardianId) {
       throw new NotFoundException('Assignment not found');
+    }
+    if (assignment.status !== AssignmentStatus.ON_SITE) {
+      throw new BadRequestException('Replacement can only be requested while on site');
+    }
+    if (assignment.job.status === JobStatus.SEEKING_REPLACEMENT) {
+      throw new BadRequestException('Replacement dispatch is already in progress for this job');
+    }
+    if (assignment.job.status !== JobStatus.IN_PROGRESS) {
+      throw new BadRequestException('Replacement can only be requested for in-progress jobs');
+    }
+
+    try {
+      assertAssignmentTransitionAllowed(
+        AssignmentStatus.ON_SITE,
+        AssignmentStatus.REPLACEMENT_REQUESTED,
+      );
+    } catch {
+      throw new BadRequestException('Cannot request replacement from current status');
+    }
+
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
+        status: AssignmentStatus.REPLACEMENT_REQUESTED,
+      });
+      return tx.jobAssignment.update({
+        where: { id: assignmentId },
+        data: {
+          replacementRequestedAt: now,
+          replacementReason: reason,
+          replacementResolvedAt: null,
+          replacementResolution: null,
+          replacementResolvedByUserId: null,
+        },
+      });
+    });
+
+    await this.audit.log({
+      action: 'REPLACEMENT_REQUESTED',
+      entityType: 'job.job_assignments',
+      entityId: assignmentId,
+      afterState: { reason },
+    });
+
+    await this.emails.sendToOpsAdmins(
+      EmailTemplateId.ASSIGNMENT_REPLACEMENT_REQUESTED,
+      {
+        jobReference: assignment.job.referenceNumber,
+        jobId: assignment.job.id,
+        reason,
+        assignmentId,
+      },
+      { entityType: 'job.job_assignments', entityId: assignmentId },
+    );
+
+    const opsUsers = await this.prisma.user.findMany({
+      where: {
+        userRoles: {
+          some: {
+            role: { code: { in: [RoleCode.OPS_ADMIN, RoleCode.SUPER_ADMIN] } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    for (const user of opsUsers) {
+      await this.notifications.createInApp(
+        user.id,
+        'Replacement requested',
+        `Job ${assignment.job.referenceNumber}: ${reason}`,
+        { assignmentId, jobId: assignment.job.id, action: 'REVIEW_REPLACEMENT' },
+      );
+    }
+
+    return result;
+  }
+
+  async listReplacementRequests() {
+    return this.prisma.jobAssignment.findMany({
+      where: { status: AssignmentStatus.REPLACEMENT_REQUESTED },
+      include: {
+        job: { include: { organization: true, location: true } },
+        guardian: { include: { user: { select: { fullName: true, email: true } } } },
+      },
+      orderBy: { replacementRequestedAt: 'asc' },
+    });
+  }
+
+  async denyReplacement(assignmentId: string, actorUserId: string, note?: string) {
+    const assignment = await this.prisma.jobAssignment.findUnique({
+      where: { id: assignmentId },
+      include: { job: true, guardian: true },
+    });
+    if (!assignment) {
+      throw new NotFoundException('Assignment not found');
+    }
+    if (assignment.status !== AssignmentStatus.REPLACEMENT_REQUESTED) {
+      throw new BadRequestException('Assignment is not awaiting replacement approval');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
+        status: AssignmentStatus.ON_SITE,
+      });
+      return tx.jobAssignment.update({
+        where: { id: assignmentId },
+        data: {
+          replacementResolution: ReplacementResolution.DENIED,
+          replacementResolvedAt: new Date(),
+          replacementResolvedByUserId: actorUserId,
+          replacementReason: note
+            ? `${assignment.replacementReason ?? ''} | denied: ${note}`.trim()
+            : assignment.replacementReason,
+        },
+      });
+    });
+
+    await this.audit.log({
+      actorUserId,
+      action: 'REPLACEMENT_DENIED',
+      entityType: 'job.job_assignments',
+      entityId: assignmentId,
+      afterState: { note },
+    });
+
+    const guardianUser = await this.prisma.guardian.findUnique({
+      where: { id: assignment.guardianId },
+      select: { userId: true },
+    });
+    if (guardianUser) {
+      await this.notifications.createInApp(
+        guardianUser.userId,
+        'Replacement denied',
+        note ?? `Your replacement request for job ${assignment.job.referenceNumber} was denied.`,
+        { assignmentId, jobId: assignment.job.id },
+      );
+    }
+
+    return result;
+  }
+
+  async approveReplacement(assignmentId: string, actorUserId: string) {
+    const assignment = await this.prisma.jobAssignment.findUnique({
+      where: { id: assignmentId },
+      include: { job: true },
+    });
+    if (!assignment) {
+      throw new NotFoundException('Assignment not found');
+    }
+    if (assignment.status !== AssignmentStatus.REPLACEMENT_REQUESTED) {
+      throw new BadRequestException('Assignment is not awaiting replacement approval');
+    }
+    if (assignment.job.status !== JobStatus.IN_PROGRESS) {
+      throw new BadRequestException('Job must be in progress to approve replacement');
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
+        status: AssignmentStatus.ON_SITE,
+      });
+      await tx.jobAssignment.update({
+        where: { id: assignmentId },
+        data: {
+          replacementResolution: ReplacementResolution.APPROVED,
+          replacementResolvedAt: now,
+          replacementResolvedByUserId: actorUserId,
+        },
+      });
+      await this.lifecycle.transitionToSeekingReplacement(tx, assignment.jobId, actorUserId);
+      await tx.job.update({
+        where: { id: assignment.jobId },
+        data: {
+          replacementDepartingAssignmentId: assignmentId,
+          dispatchDeadlineAt: new Date(Date.now() + 600_000),
+          dispatchStartedAt: now,
+          dispatchFailureReason: null,
+          unreachableSince: null,
+        },
+      });
+    });
+
+    await this.audit.log({
+      actorUserId,
+      action: 'REPLACEMENT_APPROVED',
+      entityType: 'job.job_assignments',
+      entityId: assignmentId,
+    });
+
+    await this.dispatching.requestReplacementDispatch(assignment.jobId);
+
+    return { assignmentId, jobId: assignment.jobId, status: JobStatus.SEEKING_REPLACEMENT };
+  }
+
+  private async executeReplacementHandoff(
+    substituteAssignmentId: string,
+    substituteAssignment: {
+      id: string;
+      jobId: string;
+      guardianId: string;
+      versionNumber: number;
+      replacesAssignmentId: string | null;
+      job: {
+        id: string;
+        organizationId: string;
+        referenceNumber: string;
+        status: JobStatus;
+        replacementDepartingAssignmentId: string | null;
+      };
+    },
+  ) {
+    const originalId =
+      substituteAssignment.replacesAssignmentId ??
+      substituteAssignment.job.replacementDepartingAssignmentId;
+    if (!originalId) {
+      throw new BadRequestException('Replacement handoff is missing departing assignment');
+    }
+
+    const original = await this.prisma.jobAssignment.findUnique({
+      where: { id: originalId },
+      include: { guardian: { include: { user: { select: { fullName: true } } } } },
+    });
+    if (
+      !original ||
+      original.status !== AssignmentStatus.ON_SITE ||
+      original.replacementResolution !== ReplacementResolution.APPROVED
+    ) {
+      throw new BadRequestException('Original assignment is not ready for handoff');
+    }
+
+    const handoffAt = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.updateOptimistic(tx, original.id, original.versionNumber, {
+        status: AssignmentStatus.COMPLETED,
+      });
+      await tx.jobAssignment.update({
+        where: { id: original.id },
+        data: { completedAt: handoffAt },
+      });
+
+      const updated = await this.updateOptimistic(
+        tx,
+        substituteAssignmentId,
+        substituteAssignment.versionNumber,
+        { status: AssignmentStatus.ON_SITE },
+      );
+      await tx.jobAssignment.update({
+        where: { id: substituteAssignmentId },
+        data: { arrivedAt: handoffAt },
+      });
+
+      await this.lifecycle.transitionFromSeekingReplacementToInProgress(
+        tx,
+        substituteAssignment.jobId,
+      );
+      await tx.job.update({
+        where: { id: substituteAssignment.jobId },
+        data: { replacementDepartingAssignmentId: null },
+      });
+
+      await tx.guardianShiftState.update({
+        where: { guardianId: original.guardianId },
+        data: { shiftStatus: ShiftStatus.AVAILABLE, availableForJobs: true },
+      });
+
+      return updated;
+    });
+
+    await this.audit.log({
+      action: 'REPLACEMENT_HANDOFF_COMPLETED',
+      entityType: 'job.job_assignments',
+      entityId: substituteAssignmentId,
+      afterState: {
+        originalAssignmentId: original.id,
+        substituteAssignmentId,
+      },
+    });
+
+    const subGuardian = await this.prisma.guardian.findUnique({
+      where: { id: substituteAssignment.guardianId },
+      include: { user: { select: { fullName: true } } },
+    });
+
+    await this.emails.sendToOrgOwners(
+      substituteAssignment.job.organizationId,
+      EmailTemplateId.ASSIGNMENT_REPLACEMENT_COMPLETED,
+      {
+        jobReference: substituteAssignment.job.referenceNumber,
+        jobId: substituteAssignment.job.id,
+        guardianName:
+          subGuardian?.user.fullName ?? subGuardian?.guardianCode ?? 'Replacement officer',
+      },
+      { entityType: 'job.job_assignments', entityId: substituteAssignmentId },
+    );
+
+    const owners = await this.prisma.organizationUser.findMany({
+      where: {
+        organizationId: substituteAssignment.job.organizationId,
+        role: OrgMemberRole.CLIENT_OWNER,
+      },
+      select: { userId: true },
+    });
+    for (const owner of owners) {
+      await this.notifications.createInApp(
+        owner.userId,
+        'Officer replaced',
+        `A replacement officer is now on site for job ${substituteAssignment.job.referenceNumber}.`,
+        { jobId: substituteAssignment.job.id, assignmentId: substituteAssignmentId },
+      );
+    }
+
+    return result;
+  }
+
+  async complete(assignmentId: string, guardianId: string, actorUserId: string) {
+    const assignment = await this.prisma.jobAssignment.findUnique({
+      where: { id: assignmentId },
+      include: { job: true },
+    });
+    if (!assignment || assignment.guardianId !== guardianId) {
+      throw new NotFoundException('Assignment not found');
+    }
+    if (
+      assignment.status === AssignmentStatus.ON_SITE &&
+      !assignment.replacesAssignmentId &&
+      assignment.job.status === JobStatus.SEEKING_REPLACEMENT
+    ) {
+      throw new BadRequestException('Remain on site until the replacement officer arrives');
     }
 
     const canCompleteFromOnSite = assignment.status === AssignmentStatus.ON_SITE;

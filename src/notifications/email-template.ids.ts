@@ -17,6 +17,8 @@ export enum EmailTemplateId {
   JOB_CANCELLED = 'job.cancelled',
   DISPATCH_OFFER_RECEIVED = 'dispatch.offerReceived',
   ASSIGNMENT_EARLY_RELEASE_REQUESTED = 'assignment.earlyReleaseRequested',
+  ASSIGNMENT_REPLACEMENT_REQUESTED = 'assignment.replacementRequested',
+  ASSIGNMENT_REPLACEMENT_COMPLETED = 'assignment.replacementCompleted',
 
   BILLING_INVOICE_AWAITING_CONFIRMATION = 'billing.invoiceAwaitingConfirmation',
   BILLING_INVOICE_ISSUED = 'billing.invoiceIssued',

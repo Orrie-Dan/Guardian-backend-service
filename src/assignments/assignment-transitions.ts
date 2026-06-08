@@ -24,10 +24,15 @@ export const ALLOWED_ASSIGNMENT_TRANSITIONS: Record<
   [AssignmentStatus.ON_SITE]: [
     AssignmentStatus.COMPLETED,
     AssignmentStatus.EARLY_RELEASE_REQUESTED,
+    AssignmentStatus.REPLACEMENT_REQUESTED,
     AssignmentStatus.CANCELLED,
   ],
   [AssignmentStatus.EARLY_RELEASE_REQUESTED]: [
     AssignmentStatus.COMPLETED,
+    AssignmentStatus.ON_SITE,
+    AssignmentStatus.CANCELLED,
+  ],
+  [AssignmentStatus.REPLACEMENT_REQUESTED]: [
     AssignmentStatus.ON_SITE,
     AssignmentStatus.CANCELLED,
   ],

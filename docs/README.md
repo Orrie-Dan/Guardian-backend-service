@@ -17,6 +17,7 @@ Index for G2 Sentry Guardian. Start at the [project README](../README.md) for qu
 | [api/invoice-detail.md](api/invoice-detail.md) | Client invoice JSON contract |
 | [api/invoice-disputes.md](api/invoice-disputes.md) | Dispute and void lifecycle |
 | [api/early-release.md](api/early-release.md) | Early release workflow |
+| [api/replacement.md](api/replacement.md) | Replacement handoff workflow |
 | [api/admin-billing-policies.md](api/admin-billing-policies.md) | Admin billing policy CRUD |
 | [api/admin-billing-ops.md](api/admin-billing-ops.md) | Anomaly scan and reconciliation |
 
