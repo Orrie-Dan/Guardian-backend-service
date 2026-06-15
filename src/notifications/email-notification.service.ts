@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailTemplateId, EmailTemplatePayload } from './email-template.ids';
 import { renderEmailTemplate } from './email-template.registry';
 import { formatDeliveryError } from './log-error.util';
-import { SmtpEmailService } from './smtp-email.service';
+import { EmailDeliveryService } from './email-delivery.service';
 
 export interface EmailSendContext {
   entityType?: string;
@@ -23,7 +23,7 @@ export class EmailNotificationService {
   private readonly logger = new Logger(EmailNotificationService.name);
 
   constructor(
-    private readonly smtp: SmtpEmailService,
+    private readonly email: EmailDeliveryService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -37,7 +37,7 @@ export class EmailNotificationService {
     if (!to?.trim()) {
       return { sent: false, skipped: true, reason: 'no_recipient' };
     }
-    if (!this.smtp.isConfigured()) {
+    if (!this.email.isConfigured()) {
       this.logger.debug(
         `Email skipped (SMTP not configured): ${templateId} ${context?.entityId ?? ''}`,
       );
@@ -46,7 +46,7 @@ export class EmailNotificationService {
 
     const { subject, text, html } = renderEmailTemplate(templateId, payload);
     try {
-      await this.smtp.sendMail({ to: to.trim(), subject, text, html });
+      await this.email.sendMail({ to: to.trim(), subject, text, html });
       this.logger.log(
         `Email sent: ${templateId} to=${to} entity=${context?.entityType ?? ''}/${context?.entityId ?? ''}`,
       );

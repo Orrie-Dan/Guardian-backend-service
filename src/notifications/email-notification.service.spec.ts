@@ -3,11 +3,11 @@ import { OrgMemberRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailTemplateId } from './email-template.ids';
 import { EmailNotificationService } from './email-notification.service';
-import { SmtpEmailService } from './smtp-email.service';
+import { EmailDeliveryService } from './email-delivery.service';
 
 describe('EmailNotificationService', () => {
   let service: EmailNotificationService;
-  const smtp = { isConfigured: jest.fn(), sendMail: jest.fn() };
+  const email = { isConfigured: jest.fn(), sendMail: jest.fn() };
   const prisma = {
     user: { findUnique: jest.fn() },
     organization: { findUnique: jest.fn() },
@@ -20,7 +20,7 @@ describe('EmailNotificationService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EmailNotificationService,
-        { provide: SmtpEmailService, useValue: smtp },
+        { provide: EmailDeliveryService, useValue: email },
         { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
@@ -34,12 +34,12 @@ describe('EmailNotificationService', () => {
       {},
     );
     expect(result).toEqual({ sent: false, skipped: true, reason: 'no_recipient' });
-    expect(smtp.sendMail).not.toHaveBeenCalled();
+    expect(email.sendMail).not.toHaveBeenCalled();
   });
 
   it('sendBestEffort does not throw when SMTP fails', async () => {
-    smtp.isConfigured.mockReturnValue(true);
-    smtp.sendMail.mockRejectedValue(new Error('smtp down'));
+    email.isConfigured.mockReturnValue(true);
+    email.sendMail.mockRejectedValue(new Error('smtp down'));
 
     const result = await service.sendBestEffort(
       'user@example.com',
@@ -51,8 +51,8 @@ describe('EmailNotificationService', () => {
   });
 
   it('sendToOrgOwners emails each owner', async () => {
-    smtp.isConfigured.mockReturnValue(true);
-    smtp.sendMail.mockResolvedValue(undefined);
+    email.isConfigured.mockReturnValue(true);
+    email.sendMail.mockResolvedValue(undefined);
     prisma.organization.findUnique.mockResolvedValue({
       legalName: 'Acme Ltd',
       tradingName: 'Acme',
@@ -71,7 +71,7 @@ describe('EmailNotificationService', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].sent).toBe(true);
-    expect(smtp.sendMail).toHaveBeenCalledWith(
+    expect(email.sendMail).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'owner@example.com' }),
     );
     expect(prisma.organizationUser.findMany).toHaveBeenCalledWith(

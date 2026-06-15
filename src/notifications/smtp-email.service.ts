@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { SendMailPayload } from './email.types';
 import { formatSmtpError } from './log-error.util';
 
 @Injectable()
@@ -17,17 +18,7 @@ export class SmtpEmailService {
     );
   }
 
-  async sendMail({
-    to,
-    subject,
-    text,
-    html,
-  }: {
-    to: string;
-    subject: string;
-    text: string;
-    html?: string;
-  }): Promise<void> {
+  async sendMail({ to, subject, text, html }: SendMailPayload): Promise<void> {
     const host = this.config.get<string>('SMTP_HOST');
     const port = Number(this.config.get<string>('SMTP_PORT', '587'));
     const secure = this.config.get<string>('SMTP_SECURE', 'false') === 'true';

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PindoSmsService } from '../sms/pindo-sms.service';
 import { CredentialDeliveryService } from './credential-delivery.service';
-import { SmtpEmailService } from './smtp-email.service';
+import { EmailDeliveryService } from './email-delivery.service';
 
 describe('CredentialDeliveryService', () => {
   let service: CredentialDeliveryService;
@@ -14,7 +14,7 @@ describe('CredentialDeliveryService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CredentialDeliveryService,
-        { provide: SmtpEmailService, useValue: email },
+        { provide: EmailDeliveryService, useValue: email },
         { provide: PindoSmsService, useValue: sms },
       ],
     }).compile();

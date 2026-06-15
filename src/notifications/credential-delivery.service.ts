@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PindoSmsService } from '../sms/pindo-sms.service';
 import { buildRenderedEmail } from './email-layout';
 import { formatDeliveryError } from './log-error.util';
-import { SmtpEmailService } from './smtp-email.service';
+import { EmailDeliveryService } from './email-delivery.service';
 
 export type CredentialDeliveryChannel = 'EMAIL' | 'SMS' | 'NONE';
 
@@ -23,7 +23,7 @@ export class CredentialDeliveryService {
   private readonly logger = new Logger(CredentialDeliveryService.name);
 
   constructor(
-    private readonly email: SmtpEmailService,
+    private readonly email: EmailDeliveryService,
     private readonly sms: PindoSmsService,
   ) {}
 

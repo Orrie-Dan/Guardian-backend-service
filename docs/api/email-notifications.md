@@ -1,6 +1,20 @@
 # Email notifications
 
-Transactional emails are sent via SMTP when configured (`SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, optional `SMTP_USER` / `SMTP_PASS`, `SMTP_SECURE`). Each message includes a branded **HTML** body (with a plain-text fallback for clients that do not render HTML).
+Transactional emails are sent when configured. Each message includes a branded **HTML** body (with a plain-text fallback for clients that do not render HTML).
+
+**Providers:**
+
+| Mode | When | Env vars |
+|------|------|----------|
+| **SendGrid API** (recommended on Render free tier) | `EMAIL_PROVIDER=sendgrid`, or `SENDGRID_API_KEY` set with no explicit provider | `SENDGRID_API_KEY` (or `SMTP_PASS` when `EMAIL_PROVIDER=sendgrid`), `SMTP_FROM` |
+| **SMTP** (local dev) | `EMAIL_PROVIDER=smtp`, or no SendGrid key | `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, optional `SMTP_USER` / `SMTP_PASS`, `SMTP_SECURE` |
+
+SendGrid uses HTTPS (`api.sendgrid.com`) and works on hosts that block outbound SMTP (e.g. Render free tier). SMTP uses nodemailer on port 587/465.
+
+Verify locally:
+
+- SMTP: `node scripts/smtp-verify.mjs`
+- SendGrid API: `node scripts/sendgrid-verify.mjs [recipient@example.com]`
 
 **Delivery semantics:** best-effort for all events below â€” API operations succeed even if email delivery fails. Failures are logged server-side.
 
@@ -66,7 +80,7 @@ Offer **decline** (guardian-initiated) does not create an in-app notification â€
 Email is skipped (without failing the request) when:
 
 - Recipient has no email on file
-- SMTP is not configured (non-production may log only)
+- Email delivery is not configured (no SendGrid API key / SMTP settings)
 
 ## Related
 
