@@ -16,13 +16,18 @@ import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { CreateJobDto } from './dto/create-job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
+import { CreateGuardianReviewDto } from '../guardian-reviews/dto/create-guardian-review.dto';
+import { GuardianReviewsService } from '../guardian-reviews/guardian-reviews.service';
 import { JobsService } from './jobs.service';
 
 @ApiTags('jobs')
 @ApiBearerAuth()
 @Controller('jobs')
 export class JobsController {
-  constructor(private readonly jobs: JobsService) {}
+  constructor(
+    private readonly jobs: JobsService,
+    private readonly guardianReviews: GuardianReviewsService,
+  ) {}
 
   @Post()
   @RequirePermissions('jobs:create')
@@ -113,6 +118,27 @@ export class JobsController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.jobs.complete(id, user.sub);
+  }
+
+  @Get(':id/review')
+  @RequirePermissions('jobs:read')
+  @ApiOperation({ summary: 'Guardian review for this job (null if not yet submitted)' })
+  jobReview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardianReviews.getForJob(id, user);
+  }
+
+  @Post(':id/review')
+  @RequirePermissions('jobs:review')
+  @ApiOperation({ summary: 'Submit a guardian review for a completed job' })
+  submitJobReview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateGuardianReviewDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardianReviews.submitForJob(id, dto, user);
   }
 
   @Get(':id')

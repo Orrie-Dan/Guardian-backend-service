@@ -19,6 +19,7 @@ import { ListGuardianJobsQueryDto } from '../jobs/dto/list-guardian-jobs-query.d
 import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
 import { ListEarningsQueryDto } from '../guardian-payroll/dto/list-earnings-query.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { GuardianReviewsService } from '../guardian-reviews/guardian-reviews.service';
 import { GuardiansService } from './guardians.service';
 
 @ApiTags('guardians')
@@ -28,6 +29,7 @@ export class GuardiansController {
   constructor(
     private readonly guardians: GuardiansService,
     private readonly payroll: GuardianPayrollService,
+    private readonly guardianReviews: GuardianReviewsService,
   ) {}
 
   @Get('me')
@@ -126,6 +128,16 @@ export class GuardiansController {
     return this.payroll.listPayouts(user.guardianId!, query);
   }
 
+  @Get('me/reviews')
+  @RequirePermissions('guardians:read_self')
+  @ApiOperation({ summary: 'Paginated reviews received by the signed-in guardian' })
+  myReviews(
+    @CurrentUser() user: AuthUserPayload,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.guardianReviews.listForGuardian(user.guardianId!, query, user);
+  }
+
   @Get('me/certifications')
   @RequirePermissions('guardians:read_certifications')
   certifications(@CurrentUser() user: AuthUserPayload) {
@@ -158,6 +170,17 @@ export class GuardiansController {
     @Query() query: LocationHistoryQueryDto,
   ) {
     return this.guardians.getLocationHistory(id, query);
+  }
+
+  @Get(':id/reviews')
+  @RequirePermissions('guardians:read')
+  @ApiOperation({ summary: 'Paginated reviews received by a guardian (ops)' })
+  listGuardianReviews(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardianReviews.listForGuardian(id, query, user);
   }
 
   @Get(':id/location')

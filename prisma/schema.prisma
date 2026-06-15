@@ -136,6 +136,7 @@ model User {
   invoicesDisputed       Invoice[]               @relation("InvoiceDisputedBy")
   invoicesDisputeResolved Invoice[]              @relation("InvoiceDisputeResolvedBy")
   guardianPayoutsCreated GuardianPayout[]        @relation("GuardianPayoutCreatedBy")
+  guardianReviewsAuthored GuardianReview[]        @relation("GuardianReviewsAuthored")
 
   @@map("users")
   @@schema("identity")
@@ -274,6 +275,7 @@ model Organization {
   pricingRules            PricingRule[]
   billingPolicies         BillingPolicy[]
   verificationDocuments OrganizationVerificationDocument[]
+  guardianReviews       GuardianReview[]
 
   @@map("organizations")
   @@schema("customer")
@@ -448,6 +450,7 @@ model Guardian {
   vettingRecord    GuardianVettingRecord?
   earnings         GuardianEarning[]
   payouts          GuardianPayout[]
+  reviews          GuardianReview[]
 
   @@map("guardians")
   @@schema("guardian")
@@ -670,6 +673,7 @@ model Job {
   dispatchAuditLogs DispatchAuditLog[]
   invoice      Invoice?
   guardianEarnings GuardianEarning[]
+  guardianReviews  GuardianReview[]
 
   @@index([status, createdAt])
   @@index([organizationId, status])
@@ -729,6 +733,7 @@ model JobAssignment {
   replacedByAssignments JobAssignment[] @relation("AssignmentReplacement")
   incidents           FieldIncident[]
   earning             GuardianEarning?
+  review              GuardianReview?
 
   @@unique([jobId, guardianId, assignmentRound])
   @@index([jobId, status])
@@ -755,6 +760,30 @@ model JobStatusHistory {
 
   @@index([jobId, changedAt(sort: Desc)])
   @@map("job_status_history")
+  @@schema("job")
+}
+
+model GuardianReview {
+  id             String   @id @default(uuid()) @db.Uuid
+  jobId          String   @map("job_id") @db.Uuid
+  assignmentId   String   @unique @map("assignment_id") @db.Uuid
+  guardianId     String   @map("guardian_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  reviewerUserId String   @map("reviewer_user_id") @db.Uuid
+  rating         Int      @db.SmallInt
+  comment        String?  @db.VarChar(1000)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  job          Job            @relation(fields: [jobId], references: [id])
+  assignment   JobAssignment  @relation(fields: [assignmentId], references: [id])
+  guardian     Guardian       @relation(fields: [guardianId], references: [id])
+  organization Organization   @relation(fields: [organizationId], references: [id])
+  reviewer     User           @relation("GuardianReviewsAuthored", fields: [reviewerUserId], references: [id])
+
+  @@index([guardianId, createdAt(sort: Desc)])
+  @@index([jobId])
+  @@map("guardian_reviews")
   @@schema("job")
 }
 

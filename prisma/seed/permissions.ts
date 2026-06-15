@@ -37,6 +37,7 @@ export const CLIENT_STAFF_PERMISSIONS: readonly string[] = [
 export const CLIENT_OWNER_EXTRA_PERMISSIONS: readonly string[] = [
   'jobs:cancel',
   'jobs:complete',
+  'jobs:review',
   'assignments:early_release_approve',
   'assignments:early_release_reject',
   'payments:create',
