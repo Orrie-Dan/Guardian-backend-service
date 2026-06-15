@@ -34,6 +34,11 @@ export const ALLOWED_ASSIGNMENT_TRANSITIONS: Record<
   ],
   [AssignmentStatus.REPLACEMENT_REQUESTED]: [
     AssignmentStatus.ON_SITE,
+    AssignmentStatus.AWAITING_RELIEF,
+    AssignmentStatus.CANCELLED,
+  ],
+  [AssignmentStatus.AWAITING_RELIEF]: [
+    AssignmentStatus.COMPLETED,
     AssignmentStatus.CANCELLED,
   ],
   [AssignmentStatus.COMPLETED]: [],

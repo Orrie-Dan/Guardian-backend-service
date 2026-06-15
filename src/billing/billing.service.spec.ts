@@ -10,10 +10,12 @@ import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { AuditService } from '../common/services/audit.service';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingCalculationService } from './billing-calculation.service';
 import { InvoiceViewService } from './invoice-view.service';
+import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
 import { BillingService } from './billing.service';
 
 describe('BillingService', () => {
@@ -43,6 +45,7 @@ describe('BillingService', () => {
   const audit = { log: jest.fn() };
   const policy = { assertOrgMember: jest.fn() };
   const emails = { sendToOrgOwners: jest.fn() };
+  const notifications = { notifyOrgOwnersInApp: jest.fn() };
   const outbox = { enqueue: jest.fn() };
   const calculation = {
     resolveBillingPolicy: jest.fn(),
@@ -56,6 +59,10 @@ describe('BillingService', () => {
       return inv;
     }),
   };
+  const guardianPayroll = {
+    cancelEarningsForInvoice: jest.fn(),
+    accrueForPaidInvoice: jest.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -65,9 +72,11 @@ describe('BillingService', () => {
         { provide: AuditService, useValue: audit },
         { provide: ResourceOwnerPolicy, useValue: policy },
         { provide: EmailNotificationService, useValue: emails },
+        { provide: NotificationsService, useValue: notifications },
         { provide: OutboxService, useValue: outbox },
         { provide: BillingCalculationService, useValue: calculation },
         { provide: InvoiceViewService, useValue: invoiceView },
+        { provide: GuardianPayrollService, useValue: guardianPayroll },
       ],
     }).compile();
 
@@ -128,6 +137,7 @@ describe('BillingService', () => {
       );
       expect(outbox.enqueue).toHaveBeenCalled();
       expect(emails.sendToOrgOwners).toHaveBeenCalled();
+      expect(notifications.notifyOrgOwnersInApp).toHaveBeenCalled();
     });
   });
 
@@ -158,6 +168,7 @@ describe('BillingService', () => {
         }),
       );
       expect(emails.sendToOrgOwners).toHaveBeenCalled();
+      expect(notifications.notifyOrgOwnersInApp).toHaveBeenCalled();
     });
 
     it('is idempotent when invoice is already ISSUED', async () => {
@@ -264,6 +275,7 @@ describe('BillingService', () => {
 
       expect(result.status).toBe(InvoiceStatus.DISPUTED);
       expect(emails.sendToOrgOwners).toHaveBeenCalled();
+      expect(notifications.notifyOrgOwnersInApp).toHaveBeenCalled();
     });
   });
 

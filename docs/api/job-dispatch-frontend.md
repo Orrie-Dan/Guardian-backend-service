@@ -432,6 +432,8 @@ type JobStatus =
   | 'DISPATCHING'
   | 'ASSIGNED'
   | 'IN_PROGRESS'
+  | 'SEEKING_REPLACEMENT'
+  | 'AWAITING_CONFIRMATION'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';
@@ -444,6 +446,8 @@ type AssignmentStatus =
   | 'EXPIRED'
   | 'EN_ROUTE'
   | 'ON_SITE'
+  | 'EARLY_RELEASE_REQUESTED'
+  | 'REPLACEMENT_REQUESTED'
   | 'COMPLETED'
   | 'NO_SHOW'
   | 'CANCELLED';
@@ -454,12 +458,15 @@ function clientJobPhase(
   assignments?: { status: AssignmentStatus }[],
 ) {
   const accepted = assignments?.some((a) =>
-    ['ACCEPTED', 'EN_ROUTE', 'ON_SITE'].includes(a.status),
+    ['ACCEPTED', 'EN_ROUTE', 'ON_SITE', 'REPLACEMENT_REQUESTED'].includes(a.status),
   );
   if (job.status === 'CANCELLED') return 'cancelled';
   if (job.status === 'COMPLETED') return 'completed';
+  if (job.status === 'AWAITING_CONFIRMATION') return 'awaiting_billing_confirmation';
   if (job.status === 'FAILED') return 'dispatch_failed';
-  if (accepted || job.status === 'ASSIGNED') return 'guardian_assigned';
+  if (job.status === 'SEEKING_REPLACEMENT' || accepted || job.status === 'ASSIGNED' || job.status === 'IN_PROGRESS') {
+    return 'guardian_assigned';
+  }
   if (job.status === 'DISPATCHING' || job.status === 'PENDING')
     return 'finding_guardian';
   return 'unknown';

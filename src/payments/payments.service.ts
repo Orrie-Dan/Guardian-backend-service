@@ -8,8 +8,11 @@ import { InvoiceStatus, PaymentProvider, PaymentStatus, Prisma } from '@prisma/c
 import { PrimaryLocationSetupPolicy } from '../common/policies/primary-location-setup.policy';
 import { AuditService } from '../common/services/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
+import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
 
 export interface CreatePaymentInput {
   invoiceId: string;
@@ -26,6 +29,8 @@ export class PaymentsService {
     private readonly audit: AuditService,
     private readonly locationSetup: PrimaryLocationSetupPolicy,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
+    private readonly guardianPayroll: GuardianPayrollService,
   ) {}
 
   async createPayment(input: CreatePaymentInput) {
@@ -137,7 +142,20 @@ export class PaymentsService {
         },
         { entityType: 'billing.payments', entityId: paymentId },
       );
+      const jobReference = invoice.job?.referenceNumber ?? invoice.jobId;
+      await this.notifications.notifyOrgOwnersInApp(
+        invoice.organizationId,
+        'Payment confirmed',
+        `Job ${jobReference}: ${payment.currency} ${payment.amount.toString()} received.`,
+        {
+          invoiceId: invoice.id,
+          jobId: invoice.jobId,
+          action: InAppNotificationAction.VIEW_INVOICE,
+        },
+      );
     }
+
+    await this.guardianPayroll.accrueForPaidInvoice(payment.invoiceId);
 
     return updated;
   }

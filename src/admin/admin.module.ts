@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { DispatchingModule } from '../dispatching/dispatching.module';
+import { GuardianPayrollModule } from '../guardian-payroll/guardian-payroll.module';
 import { GuardiansModule } from '../guardians/guardians.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
@@ -23,6 +24,7 @@ import { AssignmentsModule } from '../assignments/assignments.module';
     BillingModule,
     AuthModule,
     DocumentsModule,
+    GuardianPayrollModule,
     GuardiansModule,
     NotificationsModule,
     AnalyticsModule,

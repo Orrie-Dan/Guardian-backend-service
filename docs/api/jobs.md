@@ -39,6 +39,7 @@ Implementation: [`JobsService`](../../src/jobs/jobs.service.ts), [`DispatchingSe
 | `DISPATCHING` | Explicit dispatch requested (`POST /jobs/:id/dispatch`) |
 | `ASSIGNED` | Guardian accepted an offer |
 | `IN_PROGRESS` | Guardian on site (assignment `ON_SITE`) |
+| `SEEKING_REPLACEMENT` | Ops approved replacement; original still on site while substitute is dispatched (see [replacement.md](replacement.md)) |
 | `AWAITING_CONFIRMATION` | Guardian completed; DRAFT invoice created; client must confirm (or auto-confirm after `BILLING_AUTO_CONFIRM_HOURS`) |
 | `COMPLETED` | Client confirmed billing (or auto-confirmed); invoice issued |
 | `FAILED` | Dispatch failed — see `dispatchFailureReason` (`dispatch_timeout`, `dispatch_pool_exhausted`, etc.) |
@@ -179,7 +180,7 @@ Not under `/jobs` — controller prefix **`/assignments`**:
 | POST | `/assignments/:id/early-release/reject` | `assignments:early_release_reject` | Client rejects; assignment returns `ON_SITE` |
 | POST | `/assignments/:id/complete` | `assignments:complete` | Completes from `ON_SITE` or approved `EARLY_RELEASE_REQUESTED`; job → `AWAITING_CONFIRMATION`; DRAFT invoice |
 
-Accept sets job → `ASSIGNED` and cancels other open offers for that job.
+Accept cancels other open offers for that job. For initial dispatch, job → `ASSIGNED`. For **replacement** offers (job `SEEKING_REPLACEMENT`), job status stays `SEEKING_REPLACEMENT` until the substitute marks on site and handoff completes.
 
 ---
 

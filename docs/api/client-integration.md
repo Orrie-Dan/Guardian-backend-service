@@ -163,6 +163,8 @@ Full step table: [onboarding.md](onboarding.md).
 
 Poll or pull on app foreground; push is not described in this API surface yet.
 
+Route on `payload.action` when present (see [email-notifications.md](email-notifications.md) in-app matrix): e.g. `VIEW_JOB` → job detail, `VIEW_OFFER` / `VIEW_ASSIGNMENTS` → assignments, `REVIEW_INVOICE` / `VIEW_INVOICE` → invoice, `COMPLETE_SITE_SETUP` → site pinning, `REVIEW_REPLACEMENT` → ops replacement queue.
+
 ---
 
 ## Guardian app — screen → API map
@@ -201,11 +203,22 @@ Duty labels (**offline**, **available**, **busy**) and `shift_status` mapping: [
 | Client no-show | `POST /assignments/:id/no-show` | Body: `reasonCode` (required), `reasonNote` (optional). Allowed from `OFFERED`/`ACCEPTED`/`EN_ROUTE`; transitions job to `DISPATCHING` and re-queues dispatch |
 | Job detail (read) | `GET /jobs/:id` | Shared with client |
 
+### Earnings & payouts
+
+| Screen / goal | Endpoints | Notes |
+|---------------|-----------|-------|
+| Earnings summary | `GET /guardians/me/earnings` | `pendingPayout`, `paidTotal`, etc.; optional `from`/`to` |
+| Earnings ledger | `GET /guardians/me/earnings/ledger` | Per-job lines after client pays invoice |
+| Payout history | `GET /guardians/me/payouts` | Ops disbursements (MoMo/bank) |
+
+Earnings accrue when the client payment is confirmed — not on assignment complete. See [guardians.md](guardians.md) § Earnings lifecycle.
+
 Recommended guardian loop while on duty:
 
 1. `GET /assignments/me` every few seconds when waiting for offers.
 2. After accept → `en-route` → `on-site` → `complete` as UX requires.
-3. `POST /guardians/me/heartbeat` on an interval during active assignment (exact interval is a product choice; server enforces eligibility).
+3. If unable to continue on site → `POST /assignments/:id/replacement-request` (ops reviews; see [replacement.md](replacement.md)).
+4. `POST /guardians/me/heartbeat` on an interval during active assignment (exact interval is a product choice; server enforces eligibility).
 
 ### Status synchronization contract
 
@@ -215,7 +228,13 @@ Job and assignment statuses are related but not identical. The backend now enfor
 |-----------------------|----------------|
 | `OFFERED -> ACCEPTED` | `PENDING`/`DISPATCHING` -> `ASSIGNED` |
 | `EN_ROUTE -> ON_SITE` | `ASSIGNED` -> `IN_PROGRESS` |
-| `ON_SITE -> COMPLETED` | `ASSIGNED`/`IN_PROGRESS` -> `COMPLETED` |
+| `ON_SITE -> COMPLETED` | `ASSIGNED`/`IN_PROGRESS` -> `AWAITING_CONFIRMATION` (via billing flow) |
+| `ON_SITE -> REPLACEMENT_REQUESTED` | (no job change; pending ops) |
+| `REPLACEMENT_REQUESTED -> AWAITING_RELIEF` + ops approve | `IN_PROGRESS` -> `SEEKING_REPLACEMENT` + replacement dispatch |
+| `REPLACEMENT_REQUESTED -> ON_SITE` + ops deny | (no job change) |
+| Substitute `OFFERED -> ACCEPTED` (replacement) | (no job change; job stays `SEEKING_REPLACEMENT`) |
+| Substitute `EN_ROUTE -> ON_SITE` (handoff) | `SEEKING_REPLACEMENT` -> `IN_PROGRESS`; original `AWAITING_RELIEF` -> `COMPLETED` |
+| `AWAITING_RELIEF -> CANCELLED` | Job cancelled |
 | `OFFERED`/`ACCEPTED`/`EN_ROUTE` -> `NO_SHOW` | `ASSIGNED`/`IN_PROGRESS`/`DISPATCHING` -> `DISPATCHING` + `JOB_DISPATCH_REQUESTED` |
 
 ### Automatic no-show policy
@@ -244,6 +263,10 @@ Use the following event and KPI contract so mobile, backend, and ops dashboards 
 | `assignment_on_site` | `POST /assignments/:id/on-site` | `assignmentId`, `jobId` | Arrival timing milestone |
 | `assignment_early_release_requested` | `POST /assignments/:id/early-release` | `assignmentId`, `jobId` | Guardian requests early end |
 | `assignment_early_release_approved` | `POST /assignments/:id/early-release/approve` | `assignmentId`, `jobId` | Client approved early end |
+| `assignment_replacement_requested` | `POST /assignments/:id/replacement-request` | `assignmentId`, `jobId` | Guardian requests replacement (ops queue) |
+| `assignment_replacement_approved` | `POST /admin/assignments/:id/replacement/approve` | `assignmentId`, `jobId` | Ops approved; job → `SEEKING_REPLACEMENT` |
+| `assignment_replacement_denied` | `POST /admin/assignments/:id/replacement/deny` | `assignmentId`, `jobId` | Ops denied; assignment returns `ON_SITE` |
+| `assignment_replacement_handoff_completed` | Substitute `POST /assignments/:id/on-site` (handoff) | `assignmentId`, `jobId`, `guardianId` | Original relieved; client notified |
 | `assignment_completed` | `POST /assignments/:id/complete` | `assignmentId`, `jobId` | Completion milestone; job → `AWAITING_CONFIRMATION` |
 | `assignment_no_show` | `POST /assignments/:id/no-show` or automation policy | `assignmentId`, `jobId`, `guardianId` | Include `trigger = MANUAL \| SYSTEM` |
 | `offer_expired` | Offer TTL elapsed (`EXPIRED`) | `assignmentId`, `jobId`, `guardianId` | Needed for offer conversion |

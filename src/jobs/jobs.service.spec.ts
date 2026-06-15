@@ -10,6 +10,7 @@ import { DispatchingService } from '../dispatching/dispatching.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { BillingCalculationService } from '../billing/billing-calculation.service';
 import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { JobReferenceService } from './job-reference.service';
@@ -56,6 +57,10 @@ describe('JobsService', () => {
         {
           provide: EmailNotificationService,
           useValue: { sendToOrgOwners: jest.fn() },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrgOwnersInApp: jest.fn() },
         },
         { provide: GuardianLocationService, useValue: guardianLocation },
         {

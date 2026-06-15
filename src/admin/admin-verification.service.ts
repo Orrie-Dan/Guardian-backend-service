@@ -6,7 +6,6 @@ import {
 import {
   CertificationVerificationStatus,
   GuardianVerificationStatus,
-  OrgMemberRole,
   Prisma,
   VerificationStatus,
 } from '@prisma/client';
@@ -18,6 +17,7 @@ import {
 import { AuditService } from '../common/services/audit.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -162,21 +162,18 @@ export class AdminVerificationService {
       afterState: { status, reason: reason ?? null },
     });
 
-    const ownerIds = org.users
-      .filter((u) => u.role === OrgMemberRole.CLIENT_OWNER)
-      .map((u) => u.user.id);
-
     const orgName = org.tradingName ?? org.legalName ?? 'your organization';
 
     if (status === VerificationStatus.VERIFIED) {
-      for (const userId of ownerIds) {
-        await this.notifications.createInApp(
-          userId,
-          'Business approved',
-          'Your business is approved. Pin your site on the map to start booking.',
-          { organizationId: id, action: 'COMPLETE_SITE_SETUP' },
-        );
-      }
+      await this.notifications.notifyOrgOwnersInApp(
+        id,
+        'Business approved',
+        'Your business is approved. Pin your site on the map to start booking.',
+        {
+          organizationId: id,
+          action: InAppNotificationAction.COMPLETE_SITE_SETUP,
+        },
+      );
       await this.emails.sendToOrgOwners(
         id,
         EmailTemplateId.VERIFICATION_ORG_APPROVED,
@@ -184,14 +181,12 @@ export class AdminVerificationService {
         { entityType: 'customer.organizations', entityId: id },
       );
     } else if (status === VerificationStatus.REJECTED) {
-      for (const userId of ownerIds) {
-        await this.notifications.createInApp(
-          userId,
-          'Application needs attention',
-          reason ?? 'Your application was not approved.',
-          { organizationId: id, action: 'VIEW_REJECTION' },
-        );
-      }
+      await this.notifications.notifyOrgOwnersInApp(
+        id,
+        'Application needs attention',
+        reason ?? 'Your application was not approved.',
+        { organizationId: id, action: InAppNotificationAction.VIEW_REJECTION },
+      );
       await this.emails.sendToOrgOwners(
         id,
         EmailTemplateId.VERIFICATION_ORG_REJECTED,

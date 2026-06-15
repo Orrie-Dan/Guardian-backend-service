@@ -51,8 +51,15 @@ describe('AssignmentsService', () => {
   const outbox = { enqueue: jest.fn() };
   const policy = { assertOrgMember: jest.fn() };
   const emails = { sendToOrgOwners: jest.fn(), sendToOpsAdmins: jest.fn() };
-  const notifications = { createInApp: jest.fn() };
-  const dispatching = { requestReplacementDispatch: jest.fn() };
+  const notifications = {
+    notifyOpsAdminsInApp: jest.fn(),
+    notifyGuardianInApp: jest.fn(),
+    notifyOrgOwnersInApp: jest.fn(),
+  };
+  const dispatching = {
+    requestReplacementDispatch: jest.fn(),
+    isReplacementDispatchPaused: jest.fn().mockReturnValue(false),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -76,6 +83,7 @@ describe('AssignmentsService', () => {
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
       fn(prisma),
     );
+    prisma.jobAssignment.updateMany.mockResolvedValue({ count: 1 });
     jest.clearAllMocks();
   });
 
@@ -202,26 +210,75 @@ describe('AssignmentsService', () => {
     await service.requestReplacement('a-1', 'g-1', 'Medical issue');
 
     expect(emails.sendToOpsAdmins).toHaveBeenCalled();
-    expect(notifications.createInApp).toHaveBeenCalled();
+    expect(notifications.notifyOpsAdminsInApp).toHaveBeenCalled();
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'REPLACEMENT_REQUESTED' }),
     );
   });
 
   it('approves replacement and queues replacement dispatch', async () => {
-    prisma.jobAssignment.findUnique.mockResolvedValue({
-      id: 'a-1',
-      guardianId: 'g-1',
-      jobId: 'job-1',
-      status: AssignmentStatus.REPLACEMENT_REQUESTED,
-      versionNumber: 3,
-      job: { id: 'job-1', status: JobStatus.IN_PROGRESS },
-    });
+    prisma.jobAssignment.findUnique
+      .mockResolvedValueOnce({
+        id: 'a-1',
+        guardianId: 'g-1',
+        jobId: 'job-1',
+        status: AssignmentStatus.REPLACEMENT_REQUESTED,
+        versionNumber: 3,
+        job: {
+          id: 'job-1',
+          referenceNumber: 'JOB-001',
+          status: JobStatus.IN_PROGRESS,
+        },
+      })
+      .mockResolvedValueOnce({
+        id: 'a-1',
+        status: AssignmentStatus.AWAITING_RELIEF,
+      });
 
     const result = await service.approveReplacement('a-1', 'admin-1');
 
+    expect(prisma.jobAssignment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: AssignmentStatus.AWAITING_RELIEF }),
+      }),
+    );
     expect(lifecycle.transitionToSeekingReplacement).toHaveBeenCalled();
     expect(dispatching.requestReplacementDispatch).toHaveBeenCalledWith('job-1');
+    expect(notifications.notifyGuardianInApp).toHaveBeenCalled();
     expect(result.jobId).toBe('job-1');
+  });
+
+  it('decline re-dispatches with replacement flag when job is seeking replacement', async () => {
+    prisma.jobAssignment.findUnique.mockResolvedValue({
+      id: 'a-sub',
+      jobId: 'job-1',
+      guardianId: 'g-sub',
+      status: AssignmentStatus.OFFERED,
+      versionNumber: 1,
+      job: { id: 'job-1', status: JobStatus.SEEKING_REPLACEMENT },
+    });
+
+    await service.decline('a-sub', 'g-sub');
+
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { jobId: 'job-1', replacement: true },
+      }),
+    );
+  });
+
+  it('blocks complete while awaiting relief', async () => {
+    prisma.jobAssignment.findUnique.mockResolvedValue({
+      id: 'a-1',
+      jobId: 'job-1',
+      guardianId: 'g-1',
+      status: AssignmentStatus.AWAITING_RELIEF,
+      versionNumber: 1,
+      job: { status: JobStatus.SEEKING_REPLACEMENT },
+    });
+
+    await expect(service.complete('a-1', 'g-1', 'user-1')).rejects.toThrow(
+      'Remain on site until the replacement officer arrives',
+    );
   });
 });

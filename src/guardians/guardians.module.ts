@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { GuardianPayrollModule } from '../guardian-payroll/guardian-payroll.module';
 import { RedisModule } from '../redis/redis.module';
 import { ConnectivityService } from './connectivity.service';
 import { GuardiansController } from './guardians.controller';
@@ -9,7 +10,7 @@ import { GuardiansService } from './guardians.service';
 import { ShiftStateService } from './shift-state.service';
 
 @Module({
-  imports: [RedisModule],
+  imports: [RedisModule, GuardianPayrollModule],
   controllers: [GuardiansController],
   providers: [
     GuardiansService,

@@ -6,6 +6,7 @@ import { GuardianDispatchEligibilityService } from '../guardians/guardian-dispat
 import { ShiftStateService } from '../guardians/shift-state.service';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
@@ -60,6 +61,11 @@ describe('DispatchingService', () => {
   const emails = {
     sendToGuardianUser: jest.fn(),
     sendToOrgOwners: jest.fn(),
+    sendToOpsAdmins: jest.fn(),
+  };
+  const notifications = {
+    notifyGuardianInApp: jest.fn(),
+    notifyOpsAdminsInApp: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -75,6 +81,7 @@ describe('DispatchingService', () => {
         { provide: JobLifecycleService, useValue: lifecycle },
         { provide: BillingService, useValue: billing },
         { provide: EmailNotificationService, useValue: emails },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -82,6 +89,11 @@ describe('DispatchingService', () => {
     jest.clearAllMocks();
     prisma.dispatchAuditLog.create.mockResolvedValue({});
     prisma.job.update.mockResolvedValue({});
+    prisma.job.updateMany.mockResolvedValue({ count: 0 });
+    eligibility.hasActiveOffer.mockResolvedValue(false);
+    eligibility.countEligibleGuardians.mockResolvedValue(0);
+    eligibility.listEligibleGuardianIds.mockResolvedValue([]);
+    eligibility.getTriedGuardianIds.mockResolvedValue(new Set());
   });
 
   it('queues dispatch via outbox', async () => {
@@ -128,10 +140,41 @@ describe('DispatchingService', () => {
         }),
       }),
     );
+    expect(eligibility.pickParallelReachableGuardians).not.toHaveBeenCalled();
     expect(eligibility.pickNextReachableGuardian).not.toHaveBeenCalled();
   });
 
-  it('offers second guardian after first is excluded without incrementing fake attempts on empty pass', async () => {
+  it('uses parallel dispatch for STANDARD jobs', async () => {
+    prisma.job.findUnique.mockResolvedValue({
+      id: 'job-1',
+      status: JobStatus.PENDING,
+      offersSentCount: 0,
+      dispatchDeadlineAt: new Date(Date.now() + 600_000),
+      dispatchStartedAt: new Date(),
+      unreachableSince: null,
+      priority: JobPriority.STANDARD,
+      location: { district: 'gasabo' },
+    });
+    eligibility.getTriedGuardianIds.mockResolvedValue(new Set());
+    eligibility.pickParallelReachableGuardians.mockResolvedValue({
+      guardians: [],
+      excludedCount: 0,
+      candidateCount: 0,
+      reachableCount: 0,
+      eligibleIds: [],
+      reachableIds: [],
+    });
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
+      fn(prisma),
+    );
+
+    await service.processDispatch('job-1');
+
+    expect(eligibility.pickParallelReachableGuardians).toHaveBeenCalled();
+    expect(eligibility.pickNextReachableGuardian).not.toHaveBeenCalled();
+  });
+
+  it('offers reachable guardians in parallel for STANDARD job', async () => {
     prisma.job.findUnique
       .mockResolvedValueOnce({
         id: 'job-1',
@@ -143,68 +186,64 @@ describe('DispatchingService', () => {
         priority: JobPriority.STANDARD,
         location: { district: 'gasabo' },
       })
-      .mockResolvedValueOnce({ referenceNumber: 'REF-1' });
-    eligibility.hasActiveOffer.mockResolvedValue(false);
-    eligibility.countEligibleGuardians.mockResolvedValue(3);
-    eligibility.listEligibleGuardianIds.mockResolvedValue([
-      { id: 'g-1' },
-      { id: 'g-2' },
-      { id: 'g-3' },
-    ]);
+      .mockResolvedValue({ referenceNumber: 'REF-1' });
     eligibility.getTriedGuardianIds.mockResolvedValue(new Set(['g-1']));
-    eligibility.pickNextReachableGuardian.mockResolvedValue({
-      guardian: { id: 'g-2' },
+    eligibility.pickParallelReachableGuardians.mockResolvedValue({
+      guardians: [{ id: 'g-2' }, { id: 'g-3' }],
       excludedCount: 1,
-      poolCount: 3,
       candidateCount: 2,
-      reachableCount: 1,
+      reachableCount: 2,
       eligibleIds: ['g-2', 'g-3'],
-      reachableIds: ['g-2'],
+      reachableIds: ['g-2', 'g-3'],
     });
-    prisma.jobAssignment.count.mockResolvedValue(1);
-    prisma.jobAssignment.create.mockResolvedValue({
-      id: 'a-2',
-      guardianId: 'g-2',
-      expiresAt: new Date(Date.now() + 90_000),
-    });
+    prisma.jobAssignment.count.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+    prisma.jobAssignment.create
+      .mockResolvedValueOnce({
+        id: 'a-2',
+        guardianId: 'g-2',
+        expiresAt: new Date(Date.now() + 90_000),
+      })
+      .mockResolvedValueOnce({
+        id: 'a-3',
+        guardianId: 'g-3',
+        expiresAt: new Date(Date.now() + 90_000),
+      });
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
       fn(prisma),
     );
 
     await service.processDispatch('job-1');
 
-    expect(prisma.jobAssignment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ guardianId: 'g-2' }),
-      }),
-    );
+    expect(prisma.jobAssignment.create).toHaveBeenCalledTimes(2);
     expect(outbox.enqueue).not.toHaveBeenCalledWith(
       expect.objectContaining({ scheduledAt: expect.any(Date) }),
     );
   });
 
-  it('re-queues with backoff on no reachable candidates without failing immediately', async () => {
-    prisma.job.findUnique.mockResolvedValue({
-      id: 'job-1',
-      status: JobStatus.DISPATCHING,
-      offersSentCount: 1,
-      dispatchDeadlineAt: new Date(Date.now() + 600_000),
-      dispatchStartedAt: new Date(),
-      unreachableSince: null,
-      priority: JobPriority.STANDARD,
-      location: { district: 'gasabo' },
-    });
-    eligibility.hasActiveOffer.mockResolvedValue(false);
-    eligibility.countEligibleGuardians.mockResolvedValue(2);
-    eligibility.listEligibleGuardianIds.mockResolvedValue([{ id: 'g-2' }]);
-    eligibility.getTriedGuardianIds.mockResolvedValue(new Set(['g-1']));
-    eligibility.pickNextReachableGuardian.mockResolvedValue({
-      guardian: null,
-      excludedCount: 1,
-      poolCount: 2,
-      candidateCount: 1,
+  it('re-queues with backoff on first pass when eligible but unreachable', async () => {
+    prisma.job.findUnique
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: JobStatus.PENDING,
+        offersSentCount: 0,
+        dispatchDeadlineAt: new Date(Date.now() + 600_000),
+        dispatchStartedAt: new Date(),
+        unreachableSince: null,
+        priority: JobPriority.STANDARD,
+        location: { district: 'gasabo' },
+      })
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        offersSentCount: 0,
+        location: { district: 'gasabo' },
+      });
+    eligibility.getTriedGuardianIds.mockResolvedValue(new Set());
+    eligibility.pickParallelReachableGuardians.mockResolvedValue({
+      guardians: [],
+      excludedCount: 0,
+      candidateCount: 3,
       reachableCount: 0,
-      eligibleIds: ['g-2'],
+      eligibleIds: ['g-1', 'g-2', 'g-3'],
       reachableIds: [],
     });
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
@@ -217,11 +256,50 @@ describe('DispatchingService', () => {
       expect.objectContaining({
         eventType: 'JOB_DISPATCH_REQUESTED',
         payload: { jobId: 'job-1' },
+        scheduledAt: expect.any(Date),
       }),
     );
     expect(prisma.job.update).not.toHaveBeenCalledWith(
       expect.objectContaining({
         data: { status: JobStatus.FAILED },
+      }),
+    );
+  });
+
+  it('re-queues replacement dispatch when eligible but unreachable on first pass', async () => {
+    prisma.job.findUnique.mockImplementation(async () => ({
+      id: 'job-1',
+      status: JobStatus.SEEKING_REPLACEMENT,
+      offersSentCount: 0,
+      dispatchDeadlineAt: new Date(Date.now() + 600_000),
+      dispatchStartedAt: new Date(),
+      unreachableSince: null,
+      replacementDepartingAssignmentId: 'a-departing',
+      location: { district: 'gasabo' },
+    }));
+    eligibility.getTriedGuardianIds.mockResolvedValue(new Set());
+    eligibility.pickNextReachableGuardian.mockResolvedValue({
+      guardian: null,
+      excludedCount: 0,
+      poolCount: 3,
+      candidateCount: 3,
+      reachableCount: 0,
+      eligibleIds: ['g-1', 'g-2', 'g-3'],
+      reachableIds: [],
+    });
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
+      fn(prisma),
+    );
+
+    await service.processDispatch('job-1');
+
+    expect(eligibility.pickNextReachableGuardian).toHaveBeenCalled();
+    expect(eligibility.pickParallelReachableGuardians).not.toHaveBeenCalled();
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'JOB_DISPATCH_REQUESTED',
+        payload: { jobId: 'job-1', replacement: true },
+        scheduledAt: expect.any(Date),
       }),
     );
   });
@@ -266,6 +344,7 @@ describe('DispatchingService', () => {
       guardianId: 'g-1',
       status: AssignmentStatus.OFFERED,
       versionNumber: 1,
+      job: { id: 'job-1', status: JobStatus.DISPATCHING },
     });
     prisma.jobAssignment.updateMany.mockResolvedValue({ count: 1 });
     prisma.jobAssignment.findUniqueOrThrow = jest.fn().mockResolvedValue({
@@ -281,10 +360,63 @@ describe('DispatchingService', () => {
     expect(outbox.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'JOB_DISPATCH_REQUESTED',
-        payload: { jobId: 'job-1' },
+        payload: { jobId: 'job-1', replacement: false },
       }),
     );
     const call = outbox.enqueue.mock.calls[0][0];
     expect(call.scheduledAt).toBeUndefined();
+  });
+
+  it('pauses replacement dispatch when offer cap is reached', async () => {
+    prisma.job.findUnique.mockResolvedValue({
+      id: 'job-1',
+      referenceNumber: 'JOB-001',
+      status: JobStatus.SEEKING_REPLACEMENT,
+      offersSentCount: 5,
+      dispatchDeadlineAt: new Date(Date.now() + 600_000),
+      dispatchStartedAt: new Date(),
+      dispatchFailureReason: null,
+      unreachableSince: null,
+      replacementDepartingAssignmentId: 'a-departing',
+      location: { district: 'gasabo' },
+    });
+    prisma.jobAssignment.count.mockResolvedValue(10);
+
+    await service.processDispatch('job-1');
+
+    expect(prisma.job.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { dispatchFailureReason: 'replacement_dispatch_exhausted' },
+      }),
+    );
+    expect(emails.sendToOpsAdmins).toHaveBeenCalled();
+    expect(outbox.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('resumeReplacementDispatch clears pause and re-queues dispatch', async () => {
+    prisma.job.findUnique
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: JobStatus.SEEKING_REPLACEMENT,
+        replacementDepartingAssignmentId: 'a-departing',
+      })
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: JobStatus.SEEKING_REPLACEMENT,
+      });
+    prisma.jobAssignment.findUnique.mockResolvedValue({
+      id: 'a-departing',
+      status: AssignmentStatus.AWAITING_RELIEF,
+    });
+
+    const result = await service.resumeReplacementDispatch('job-1', 'admin-1');
+
+    expect(prisma.job.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ dispatchFailureReason: null }),
+      }),
+    );
+    expect(outbox.enqueue).toHaveBeenCalled();
+    expect(result.queued).toBe(true);
   });
 });

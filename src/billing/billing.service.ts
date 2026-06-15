@@ -20,8 +20,10 @@ import {
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { BillingCalculationService } from './billing-calculation.service';
 import {
@@ -43,6 +45,7 @@ import {
   toClientInvoiceSummary,
 } from './invoice-detail.presenter';
 import { InvoiceViewService } from './invoice-view.service';
+import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
 
 type JobWithLocation = Job & { location: Location };
 
@@ -53,9 +56,11 @@ export class BillingService {
     private readonly audit: AuditService,
     private readonly policy: ResourceOwnerPolicy,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
     private readonly calculation: BillingCalculationService,
     private readonly outbox: OutboxService,
     private readonly invoiceView: InvoiceViewService,
+    private readonly guardianPayroll: GuardianPayrollService,
   ) {}
 
   async resolvePrice(
@@ -219,6 +224,16 @@ export class BillingService {
       },
       { entityType: 'billing.invoices', entityId: invoice.id },
     );
+    await this.notifications.notifyOrgOwnersInApp(
+      job.organizationId,
+      'Invoice awaiting confirmation',
+      `Job ${job.referenceNumber}: ${rule.currency} ${total.toString()} (${amounts.billableHours.toFixed(2)} billable hours).`,
+      {
+        invoiceId: invoice.id,
+        jobId: job.id,
+        action: InAppNotificationAction.REVIEW_INVOICE,
+      },
+    );
 
     return invoice;
   }
@@ -315,6 +330,17 @@ export class BillingService {
       },
       { entityType: 'billing.invoices', entityId: invoiceId },
     );
+    const jobReference = invoice.job?.referenceNumber ?? invoice.jobId;
+    await this.notifications.notifyOrgOwnersInApp(
+      invoice.organizationId,
+      'Invoice issued',
+      `Job ${jobReference}: ${invoice.currency} ${invoice.total.toString()} is ready to pay.`,
+      {
+        invoiceId,
+        jobId: invoice.jobId,
+        action: InAppNotificationAction.VIEW_INVOICE,
+      },
+    );
     return updated;
   }
 
@@ -381,6 +407,18 @@ export class BillingService {
       },
       { entityType: 'billing.invoices', entityId: id },
     );
+    const voidJobReference = invoice.job?.referenceNumber ?? invoice.jobId;
+    await this.notifications.notifyOrgOwnersInApp(
+      invoice.organizationId,
+      'Invoice voided',
+      `Job ${voidJobReference}: ${body.voidReason}`,
+      {
+        invoiceId: id,
+        jobId: invoice.jobId,
+        action: InAppNotificationAction.VIEW_INVOICE,
+      },
+    );
+    await this.guardianPayroll.cancelEarningsForInvoice(id);
     return updated;
   }
 
@@ -436,6 +474,17 @@ export class BillingService {
         reason: body.reason,
       },
       { entityType: 'billing.invoices', entityId: id },
+    );
+    const disputedJobReference = invoice.job?.referenceNumber ?? invoice.jobId;
+    await this.notifications.notifyOrgOwnersInApp(
+      invoice.organizationId,
+      'Invoice disputed',
+      `Job ${disputedJobReference}: ${body.reason}`,
+      {
+        invoiceId: id,
+        jobId: invoice.jobId,
+        action: InAppNotificationAction.VIEW_INVOICE,
+      },
     );
 
     return updated;
@@ -502,6 +551,17 @@ export class BillingService {
         reason: body.note ?? 'Dispute cleared',
       },
       { entityType: 'billing.invoices', entityId: id },
+    );
+    const resolvedJobReference = invoice.job?.referenceNumber ?? invoice.jobId;
+    await this.notifications.notifyOrgOwnersInApp(
+      invoice.organizationId,
+      'Invoice dispute resolved',
+      `Job ${resolvedJobReference}: ${body.note ?? 'Dispute cleared'}`,
+      {
+        invoiceId: id,
+        jobId: invoice.jobId,
+        action: InAppNotificationAction.VIEW_INVOICE,
+      },
     );
 
     return updated;

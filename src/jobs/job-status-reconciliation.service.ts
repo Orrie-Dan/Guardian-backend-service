@@ -9,6 +9,7 @@ const ACTIVE_ASSIGNMENT_STATUSES = new Set<AssignmentStatus>([
   AssignmentStatus.ON_SITE,
   AssignmentStatus.EARLY_RELEASE_REQUESTED,
   AssignmentStatus.REPLACEMENT_REQUESTED,
+  AssignmentStatus.AWAITING_RELIEF,
 ]);
 
 const REPLACEMENT_PIPELINE_STATUSES = new Set<AssignmentStatus>([
@@ -88,11 +89,18 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
           return statuses.includes(AssignmentStatus.ON_SITE);
         }
         if (job.status === JobStatus.SEEKING_REPLACEMENT) {
-          const hasOnSiteOriginal = statuses.includes(AssignmentStatus.ON_SITE);
+          const hasAwaitingReliefOriginal = statuses.includes(
+            AssignmentStatus.AWAITING_RELIEF,
+          );
+          const hasLegacyOnSiteOriginal = statuses.includes(AssignmentStatus.ON_SITE);
           const hasReplacementPipeline = statuses.some((status) =>
             REPLACEMENT_PIPELINE_STATUSES.has(status),
           );
-          return !hasOnSiteOriginal && !hasReplacementPipeline;
+          return (
+            !hasAwaitingReliefOriginal &&
+            !hasLegacyOnSiteOriginal &&
+            !hasReplacementPipeline
+          );
         }
         return false;
       });

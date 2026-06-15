@@ -12,6 +12,7 @@ export enum EmailTemplateId {
 
   GUARDIAN_ACTIVATED = 'guardian.activated',
   GUARDIAN_SUSPENDED = 'guardian.suspended',
+  GUARDIAN_PAYOUT_CONFIRMED = 'guardian.payoutConfirmed',
 
   JOB_CREATED = 'job.created',
   JOB_CANCELLED = 'job.cancelled',
@@ -19,6 +20,7 @@ export enum EmailTemplateId {
   ASSIGNMENT_EARLY_RELEASE_REQUESTED = 'assignment.earlyReleaseRequested',
   ASSIGNMENT_REPLACEMENT_REQUESTED = 'assignment.replacementRequested',
   ASSIGNMENT_REPLACEMENT_COMPLETED = 'assignment.replacementCompleted',
+  ASSIGNMENT_REPLACEMENT_DISPATCH_PAUSED = 'assignment.replacementDispatchPaused',
 
   BILLING_INVOICE_AWAITING_CONFIRMATION = 'billing.invoiceAwaitingConfirmation',
   BILLING_INVOICE_ISSUED = 'billing.invoiceIssued',

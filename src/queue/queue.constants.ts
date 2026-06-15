@@ -19,12 +19,17 @@ export const MAX_DISPATCH_ATTEMPTS = parsePositiveIntEnv('MAX_DISPATCH_ATTEMPTS'
 export const DISPATCH_POOL_SIZE = parsePositiveIntEnv('DISPATCH_POOL_SIZE', 50);
 /** Safety cap on offers per job to prevent runaway loops. */
 export const MAX_OFFERS_PER_JOB = parsePositiveIntEnv('MAX_OFFERS_PER_JOB', 20);
+/** Safety cap on replacement substitute offers per job (pause + alert ops when exceeded). */
+export const MAX_REPLACEMENT_OFFERS_PER_JOB = parsePositiveIntEnv(
+  'MAX_REPLACEMENT_OFFERS_PER_JOB',
+  10,
+);
 /** Fail when eligible guardians exist but none are reachable for this long. */
 export const DISPATCH_UNREACHABLE_GRACE_MS = parsePositiveIntEnv(
   'DISPATCH_UNREACHABLE_GRACE_MS',
   120_000,
 );
-/** Parallel offers for URGENT priority jobs. */
+/** Parallel offers per initial dispatch round (all priorities). */
 export const URGENT_PARALLEL_OFFERS = parsePositiveIntEnv('URGENT_PARALLEL_OFFERS', 3);
 /** @deprecated Use DISPATCH_POOL_SIZE */
 export const CANDIDATE_POOL_SIZE = DISPATCH_POOL_SIZE;

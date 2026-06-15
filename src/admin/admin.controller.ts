@@ -59,6 +59,12 @@ import { DocumentsService } from '../documents/documents.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
 import { AdminReplacementService } from './admin-replacement.service';
 import { ReplacementDenyDto } from '../assignments/dto/replacement.dto';
+import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
+import { ListEarningsQueryDto } from '../guardian-payroll/dto/list-earnings-query.dto';
+import {
+  ConfirmGuardianPayoutDto,
+  CreateGuardianPayoutDto,
+} from '../guardian-payroll/dto/create-guardian-payout.dto';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -80,6 +86,7 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly dispatching: DispatchingService,
     private readonly replacement: AdminReplacementService,
+    private readonly guardianPayroll: GuardianPayrollService,
   ) {}
 
   @Get('assignments/replacement-requests')
@@ -105,6 +112,15 @@ export class AdminController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.replacement.deny(id, user.sub, dto.note);
+  }
+
+  @Post('jobs/:id/replacement/resume-dispatch')
+  @RequirePermissions('admin:assignments:replacement')
+  resumeReplacementDispatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.replacement.resumeDispatch(id, user.sub);
   }
 
   @Get('jobs/:id/dispatch-debug')
@@ -245,6 +261,43 @@ export class AdminController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.guardians.suspend(id, user);
+  }
+
+  @Get('guardians/:id/earnings')
+  @RequirePermissions('admin:guardian_earnings:read')
+  guardianEarnings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListEarningsQueryDto,
+  ) {
+    return this.guardianPayroll.getLedger(id, query);
+  }
+
+  @Post('guardians/:id/payouts')
+  @RequirePermissions('admin:guardian_payouts:write')
+  createGuardianPayout(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: CreateGuardianPayoutDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.guardianPayroll.createPayout(id, body, user.sub);
+  }
+
+  @Get('guardian-payouts')
+  @RequirePermissions('admin:guardian_payouts:read')
+  listGuardianPayouts(
+    @Query() query: PaginationQueryDto,
+    @Query('guardianId') guardianId?: string,
+  ) {
+    return this.guardianPayroll.listAdminPayouts(query, guardianId);
+  }
+
+  @Post('guardian-payouts/:id/confirm')
+  @RequirePermissions('admin:guardian_payouts:write')
+  confirmGuardianPayout(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ConfirmGuardianPayoutDto,
+  ) {
+    return this.guardianPayroll.confirmPayout(id, body.externalTxnId);
   }
 
   @Get('verification/organizations')

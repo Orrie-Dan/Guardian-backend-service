@@ -102,6 +102,9 @@ Heartbeats **write** coordinates; these routes **read** the latest point or hist
 | Route | Permission | Description |
 |-------|------------|-------------|
 | `GET /guardians/me/jobs` | `jobs:read` | Paginated job history (all statuses); each item includes `location`, `organization`, your `assignments[]` (with `incidents`), and `statusHistory` |
+| `GET /guardians/me/earnings` | `guardians:read_earnings` | Summary totals: `pendingPayout`, `paidTotal`, `blockedTotal`, `cancelledTotal` (optional `from`/`to` ISO query) |
+| `GET /guardians/me/earnings/ledger` | `guardians:read_earnings` | Paginated per-job earnings lines (hours, rate, amount, status) — no client invoice amounts |
+| `GET /guardians/me/payouts` | `guardians:read_earnings` | Paginated payout history (MoMo/bank disbursements) |
 | `GET /guardians/me/location` | `guardians:read_self` | Latest fix for signed-in guardian |
 | `GET /guardians/me/location/history` | `guardians:read_self` | Paginated trail (`page`, `limit`, optional `since` ISO timestamp) |
 | `GET /guardians/:id/location` | `guardians:read` | Latest fix (ops / dispatch) |
@@ -122,7 +125,12 @@ Prefer polling `GET …/location` during an active job; send heartbeats with `la
 | `guardians:shift` | `POST /guardians/me/shift/start`, `POST /guardians/me/shift/end` |
 | `guardians:heartbeat` | `POST /guardians/me/heartbeat` |
 | `guardians:read_self` | `GET /guardians/me`, `GET /guardians/me/location`, `GET /guardians/me/location/history` |
+| `guardians:read_earnings` | `GET /guardians/me/earnings`, `GET /guardians/me/earnings/ledger`, `GET /guardians/me/payouts` |
 | `guardians:read` | `GET /guardians/:id/location`, `GET /guardians/:id/location/history` |
+
+## Earnings lifecycle
+
+Earnings accrue when the **client invoice is paid** (`POST /payments/:id/confirm`). Amount = assignment payable hours × guardian `hourlyPayRate` (set by ops via `PATCH /admin/guardians/:id`). Status `BLOCKED` if no rate was configured at accrual time. Ops disburses via `POST /admin/guardians/:id/payouts` then `POST /admin/guardian-payouts/:id/confirm`.
 
 ---
 

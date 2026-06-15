@@ -6,6 +6,7 @@ import { PasswordService } from '../auth/password.service';
 import { AuditService } from '../common/services/audit.service';
 import { CredentialDeliveryService } from '../notifications/credential-delivery.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdminGuardiansService } from './admin-guardians.service';
 
@@ -22,6 +23,7 @@ describe('AdminGuardiansService', () => {
   const passwords = { hash: jest.fn() };
   const credentials = { sendGuardianCredentials: jest.fn() };
   const emails = { sendToUser: jest.fn().mockResolvedValue({ sent: true }) };
+  const notifications = { notifyUserInApp: jest.fn() };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -33,6 +35,7 @@ describe('AdminGuardiansService', () => {
         { provide: PasswordService, useValue: passwords },
         { provide: CredentialDeliveryService, useValue: credentials },
         { provide: EmailNotificationService, useValue: emails },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 

@@ -13,6 +13,7 @@ For field-level API detail, follow the linked domain guides under [`docs/api/`](
 | Guardian complete issued invoice immediately | Job → `AWAITING_CONFIRMATION`, invoice → `DRAFT`; client confirms or auto-confirm issues |
 | Full scheduled window always billed | **Billing policies** compute billable hours from actual on-site time |
 | Silent early leave | **Early release** request / approve / auto-approve workflow |
+| Officer cannot continue mid-shift | **Replacement handoff** — ops approve, substitute dispatched, original stays on site until handoff |
 | No formal dispute path | Invoice **`DISPUTED`** status, client dispute + admin resolve |
 | Ops blind to under-delivery | Scheduled **anomaly scan** + **reconciliation** report |
 | Raw invoice JSON in clients | Stable **`ClientInvoiceDetail`** / **`ClientInvoiceSummary`** contract |
@@ -46,6 +47,7 @@ npm run build && npm run start:prod
 | `20260603120000_billing_confirmation` | `BillingPolicy`, `JobStatus.AWAITING_CONFIRMATION`, invoice breakdown columns |
 | `20260603140000_early_release_workflow` | `EARLY_RELEASE_REQUESTED`, early-release fields on assignments |
 | `20260603160000_invoice_dispute_lifecycle` | `PENDING_CONFIRMATION`, `DISPUTED`, dispute/void metadata |
+| `20260605120000_replacement_handoff` | `REPLACEMENT_REQUESTED`, `SEEKING_REPLACEMENT`, replacement fields on assignments/jobs |
 
 ### Environment variables
 
@@ -167,6 +169,24 @@ Assignment status **`EARLY_RELEASE_REQUESTED`** added. Auto-approve runs on a 60
 
 ---
 
+## Phase 3b — Replacement handoff workflow
+
+| Action | Endpoint | Permission |
+|--------|----------|------------|
+| Request | `POST /assignments/:id/replacement-request` | `assignments:replacement_request` |
+| List pending | `GET /admin/assignments/replacement-requests` | `admin:assignments:replacement` |
+| Approve | `POST /admin/assignments/:id/replacement/approve` | `admin:assignments:replacement` |
+| Deny | `POST /admin/assignments/:id/replacement/deny` | `admin:assignments:replacement` |
+| Handoff | Substitute `POST /assignments/:id/on-site` | `assignments:on_site` |
+
+Assignment status **`REPLACEMENT_REQUESTED`** and job status **`SEEKING_REPLACEMENT`** added. Original officer stays **`ON_SITE`** until substitute arrives (Option A). Client is notified **after handoff**, not on request.
+
+**Billing:** draft invoices aggregate coverage from relieved + final completed assignments; line item `replacement_handoff` when multiple officers served the job.
+
+**Docs:** [api/replacement.md](api/replacement.md)
+
+---
+
 ## Phase 4 — Invoice dispute lifecycle
 
 ### Invoice statuses (billing)
@@ -270,6 +290,8 @@ Swagger: `ClientInvoiceDetailDto` at `/docs`.
 | `billing:issue`, `billing:void` | Ops |
 | `assignments:early_release` | Guardian |
 | `assignments:early_release_approve`, `assignments:early_release_reject` | Client owner, ops |
+| `assignments:replacement_request` | Guardian |
+| `admin:assignments:replacement` | Ops |
 | `admin:billing:read`, `admin:billing:write` | Ops |
 | `admin:invoices:resolve_dispute` | Ops |
 | `admin:invoices:read` | Ops |
@@ -283,6 +305,8 @@ Swagger: `ClientInvoiceDetailDto` at `/docs`.
 | `billing.invoiceAwaitingConfirmation` | DRAFT invoice created |
 | `billing.invoiceIssued` | Invoice issued |
 | `assignment.earlyReleaseRequested` | Guardian early-release request |
+| `assignment.replacementRequested` | Guardian replacement request (ops) |
+| `assignment.replacementCompleted` | Replacement handoff complete (client owners) |
 | `billing.invoiceDisputed` | Client dispute |
 | `billing.invoiceDisputeResolved` | Admin clears dispute |
 | `billing.invoiceVoided` | Void (includes reason) |
@@ -297,8 +321,8 @@ Full matrix: [api/email-notifications.md](api/email-notifications.md).
 1. Deploy API — migrations, seed, env, restart.
 2. Ops — configure [billing policies](api/admin-billing-policies.md) and [pricing rules](api/admin-pricing.md).
 3. Client apps — `AWAITING_CONFIRMATION`, `ClientInvoiceDetail`, confirm/dispute/pay flows.
-4. Guardian app — early release (if policies allow).
-5. Admin — reconciliation UI, audit alerts, dispute resolution.
+4. Guardian app — early release (if policies allow) and replacement request (on site).
+5. Admin — replacement queue, reconciliation UI, audit alerts, dispute resolution.
 6. Smoke test — guardian complete → client review → confirm → pay; optional dispute path.
 
 ---
@@ -314,6 +338,7 @@ Full matrix: [api/email-notifications.md](api/email-notifications.md).
 | Invoice JSON contract | [api/invoice-detail.md](api/invoice-detail.md) |
 | Disputes | [api/invoice-disputes.md](api/invoice-disputes.md) |
 | Early release | [api/early-release.md](api/early-release.md) |
+| Replacement handoff | [api/replacement.md](api/replacement.md) |
 | Admin billing policies | [api/admin-billing-policies.md](api/admin-billing-policies.md) |
 | Ops / reconciliation | [api/admin-billing-ops.md](api/admin-billing-ops.md) |
 | Pricing rules | [api/admin-pricing.md](api/admin-pricing.md) |

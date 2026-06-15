@@ -16,13 +16,19 @@ import { HeartbeatDto } from './dto/heartbeat.dto';
 import { LocationHistoryQueryDto } from './dto/location-history-query.dto';
 import { UpdateGuardianDto } from './dto/update-guardian.dto';
 import { ListGuardianJobsQueryDto } from '../jobs/dto/list-guardian-jobs-query.dto';
+import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
+import { ListEarningsQueryDto } from '../guardian-payroll/dto/list-earnings-query.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { GuardiansService } from './guardians.service';
 
 @ApiTags('guardians')
 @ApiBearerAuth()
 @Controller('guardians')
 export class GuardiansController {
-  constructor(private readonly guardians: GuardiansService) {}
+  constructor(
+    private readonly guardians: GuardiansService,
+    private readonly payroll: GuardianPayrollService,
+  ) {}
 
   @Get('me')
   @RequirePermissions('guardians:read_self')
@@ -88,6 +94,36 @@ export class GuardiansController {
     @Query() query: ListGuardianJobsQueryDto,
   ) {
     return this.guardians.listMyJobs(user, query);
+  }
+
+  @Get('me/earnings/ledger')
+  @RequirePermissions('guardians:read_earnings')
+  @ApiOperation({ summary: 'Paginated earnings ledger for the signed-in guardian' })
+  myEarningsLedger(
+    @CurrentUser() user: AuthUserPayload,
+    @Query() query: ListEarningsQueryDto,
+  ) {
+    return this.payroll.getLedger(user.guardianId!, query);
+  }
+
+  @Get('me/earnings')
+  @RequirePermissions('guardians:read_earnings')
+  @ApiOperation({ summary: 'Earnings summary (pending vs paid) for the signed-in guardian' })
+  myEarningsSummary(
+    @CurrentUser() user: AuthUserPayload,
+    @Query() query: ListEarningsQueryDto,
+  ) {
+    return this.payroll.getSummary(user.guardianId!, query);
+  }
+
+  @Get('me/payouts')
+  @RequirePermissions('guardians:read_earnings')
+  @ApiOperation({ summary: 'Payout history for the signed-in guardian' })
+  myPayouts(
+    @CurrentUser() user: AuthUserPayload,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.payroll.listPayouts(user.guardianId!, query);
   }
 
   @Get('me/certifications')

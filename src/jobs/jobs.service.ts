@@ -31,8 +31,10 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { CreateJobDto } from './dto/create-job.dto';
 import { ListJobsQueryDto } from './dto/list-jobs-query.dto';
 import { JobReferenceService } from './job-reference.service';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   JobTrackingResponse,
   TRACKABLE_ASSIGNMENT_STATUSES,
@@ -55,6 +57,7 @@ export class JobsService {
     private readonly audit: AuditService,
     private readonly dispatching: DispatchingService,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
     private readonly guardianLocation: GuardianLocationService,
     private readonly billingCalculation: BillingCalculationService,
     private readonly invoiceView: InvoiceViewService,
@@ -147,6 +150,12 @@ export class JobsService {
       EmailTemplateId.JOB_CREATED,
       { jobReference: job.referenceNumber, jobId: job.id },
       { entityType: 'job.jobs', entityId: job.id },
+    );
+    await this.notifications.notifyOrgOwnersInApp(
+      dto.organizationId,
+      'Job created',
+      `Job ${job.referenceNumber} has been created.`,
+      { jobId: job.id, action: InAppNotificationAction.VIEW_JOB },
     );
 
     return job;
@@ -318,7 +327,7 @@ export class JobsService {
       throw new BadRequestException('Job cannot be cancelled');
     }
 
-    await this.dispatching.releaseInFlightOffersForJob(id);
+    await this.dispatching.releaseReplacementPipelineForJob(id);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.job.update({
@@ -353,6 +362,14 @@ export class JobsService {
         reason: reason ?? undefined,
       },
       { entityType: 'job.jobs', entityId: id },
+    );
+    await this.notifications.notifyOrgOwnersInApp(
+      job.organizationId,
+      'Job cancelled',
+      reason
+        ? `Job ${job.referenceNumber} was cancelled: ${reason}`
+        : `Job ${job.referenceNumber} was cancelled.`,
+      { jobId: id, action: InAppNotificationAction.VIEW_JOB },
     );
 
     return { id, status: JobStatus.CANCELLED };

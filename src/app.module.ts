@@ -13,6 +13,7 @@ import { CommonModule } from './common/common.module';
 import { DocumentsModule } from './documents/documents.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { DispatchingModule } from './dispatching/dispatching.module';
+import { GuardianPayrollModule } from './guardian-payroll/guardian-payroll.module';
 import { GuardiansModule } from './guardians/guardians.module';
 import { JobsModule } from './jobs/jobs.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -36,6 +37,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     OutboxModule,
     AuthModule,
     UsersModule,
+    GuardianPayrollModule,
     GuardiansModule,
     OrganizationsModule,
     JobsModule,

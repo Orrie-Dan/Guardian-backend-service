@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { NotificationChannel, Prisma } from '@prisma/client';
+import { NotificationChannel, OrgMemberRole, Prisma, RoleCode } from '@prisma/client';
 import { AuthUserPayload } from '../auth/interfaces/auth-user.interface';
 import {
   buildPaginatedMeta,
@@ -27,6 +27,77 @@ export class NotificationsService {
         payload: payload as Prisma.InputJsonValue | undefined,
       },
     });
+  }
+
+  async notifyUserInApp(
+    userId: string,
+    title: string,
+    body: string,
+    payload?: Record<string, unknown>,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      return 0;
+    }
+    await this.createInApp(userId, title, body, payload);
+    return 1;
+  }
+
+  async notifyOrgOwnersInApp(
+    organizationId: string,
+    title: string,
+    body: string,
+    payload?: Record<string, unknown>,
+  ) {
+    const owners = await this.prisma.organizationUser.findMany({
+      where: { organizationId, role: OrgMemberRole.CLIENT_OWNER },
+      select: { userId: true },
+    });
+    for (const owner of owners) {
+      await this.createInApp(owner.userId, title, body, payload);
+    }
+    return owners.length;
+  }
+
+  async notifyOpsAdminsInApp(
+    title: string,
+    body: string,
+    payload?: Record<string, unknown>,
+  ) {
+    const opsUsers = await this.prisma.user.findMany({
+      where: {
+        userRoles: {
+          some: {
+            role: { code: { in: [RoleCode.OPS_ADMIN, RoleCode.SUPER_ADMIN] } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    for (const user of opsUsers) {
+      await this.createInApp(user.id, title, body, payload);
+    }
+    return opsUsers.length;
+  }
+
+  async notifyGuardianInApp(
+    guardianId: string,
+    title: string,
+    body: string,
+    payload?: Record<string, unknown>,
+  ) {
+    const guardian = await this.prisma.guardian.findUnique({
+      where: { id: guardianId },
+      select: { userId: true },
+    });
+    if (!guardian) {
+      return 0;
+    }
+    await this.createInApp(guardian.userId, title, body, payload);
+    return 1;
   }
 
   async list(actor: AuthUserPayload, query: PaginationQueryDto) {

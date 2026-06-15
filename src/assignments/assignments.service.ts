@@ -10,7 +10,6 @@ import {
   AssignmentStatus,
   EarlyReleaseResolution,
   JobStatus,
-  OrgMemberRole,
   Prisma,
   ReplacementResolution,
   RoleCode,
@@ -24,6 +23,7 @@ import { ShiftStateService } from '../guardians/shift-state.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isEarlyReleaseApproved } from './early-release.util';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
@@ -37,6 +37,7 @@ import {
 } from './competing-offer-release.util';
 import { assertAssignmentTransitionAllowed } from './assignment-transitions';
 import { NoShowReasonCode } from './dto/no-show.dto';
+import { assertSeekingReplacementState } from './replacement-invariants';
 
 const NO_SHOW_ALLOWED_FROM_STATUSES = new Set<AssignmentStatus>([
   AssignmentStatus.OFFERED,
@@ -93,6 +94,7 @@ export class AssignmentsService {
             AssignmentStatus.ON_SITE,
             AssignmentStatus.EARLY_RELEASE_REQUESTED,
             AssignmentStatus.REPLACEMENT_REQUESTED,
+            AssignmentStatus.AWAITING_RELIEF,
           ],
         },
       },
@@ -160,6 +162,7 @@ export class AssignmentsService {
   async decline(assignmentId: string, guardianId: string) {
     const assignment = await this.prisma.jobAssignment.findUnique({
       where: { id: assignmentId },
+      include: { job: true },
     });
 
     if (!assignment || assignment.guardianId !== guardianId) {
@@ -182,12 +185,16 @@ export class AssignmentsService {
       entityId: assignmentId,
     });
 
-    await this.outbox.enqueue({
-      aggregateType: 'job',
-      aggregateId: assignment.jobId,
-      eventType: 'JOB_DISPATCH_REQUESTED',
-      payload: { jobId: assignment.jobId },
-    });
+    const isReplacement =
+      assignment.job.status === JobStatus.SEEKING_REPLACEMENT;
+    if (!isReplacement || !this.dispatching.isReplacementDispatchPaused(assignment.job)) {
+      await this.outbox.enqueue({
+        aggregateType: 'job',
+        aggregateId: assignment.jobId,
+        eventType: 'JOB_DISPATCH_REQUESTED',
+        payload: { jobId: assignment.jobId, replacement: isReplacement },
+      });
+    }
 
     return { assignmentId, status: AssignmentStatus.DECLINED };
   }
@@ -247,6 +254,12 @@ export class AssignmentsService {
     });
     if (!assignment || assignment.guardianId !== guardianId) {
       throw new NotFoundException('Assignment not found');
+    }
+    if (
+      assignment.status === AssignmentStatus.REPLACEMENT_REQUESTED ||
+      assignment.status === AssignmentStatus.AWAITING_RELIEF
+    ) {
+      throw new BadRequestException('Cannot request early release during replacement workflow');
     }
     if (assignment.status !== AssignmentStatus.ON_SITE) {
       throw new BadRequestException('Early release can only be requested while on site');
@@ -319,6 +332,16 @@ export class AssignmentsService {
         },
         { entityType: 'job.job_assignments', entityId: assignmentId },
       );
+      await this.notifications.notifyOrgOwnersInApp(
+        assignment.job.organizationId,
+        'Early release requested',
+        `Job ${assignment.job.referenceNumber}: ${reason}`,
+        {
+          assignmentId,
+          jobId: assignment.job.id,
+          action: InAppNotificationAction.REVIEW_EARLY_RELEASE,
+        },
+      );
     }
 
     return result;
@@ -348,6 +371,13 @@ export class AssignmentsService {
       entityType: 'job.job_assignments',
       entityId: assignmentId,
     });
+
+    await this.notifications.notifyGuardianInApp(
+      assignment.guardianId,
+      'Early release approved',
+      `Your early release request for job ${assignment.job.referenceNumber} was approved.`,
+      { assignmentId, jobId: assignment.job.id },
+    );
 
     return updated;
   }
@@ -387,12 +417,21 @@ export class AssignmentsService {
       afterState: { note },
     });
 
+    await this.notifications.notifyGuardianInApp(
+      assignment.guardianId,
+      'Early release denied',
+      note ??
+        `Your early release request for job ${assignment.job.referenceNumber} was denied.`,
+      { assignmentId, jobId: assignment.job.id },
+    );
+
     return result;
   }
 
   async autoApproveEarlyRelease(assignmentId: string) {
     const assignment = await this.prisma.jobAssignment.findUnique({
       where: { id: assignmentId },
+      include: { job: { select: { id: true, referenceNumber: true } } },
     });
     if (
       !assignment ||
@@ -416,6 +455,13 @@ export class AssignmentsService {
       entityType: 'job.job_assignments',
       entityId: assignmentId,
     });
+
+    await this.notifications.notifyGuardianInApp(
+      assignment.guardianId,
+      'Early release approved',
+      `Your early release request for job ${assignment.job.referenceNumber} was auto-approved.`,
+      { assignmentId, jobId: assignment.job.id },
+    );
 
     return updated;
   }
@@ -486,24 +532,15 @@ export class AssignmentsService {
       { entityType: 'job.job_assignments', entityId: assignmentId },
     );
 
-    const opsUsers = await this.prisma.user.findMany({
-      where: {
-        userRoles: {
-          some: {
-            role: { code: { in: [RoleCode.OPS_ADMIN, RoleCode.SUPER_ADMIN] } },
-          },
-        },
+    await this.notifications.notifyOpsAdminsInApp(
+      'Replacement requested',
+      `Job ${assignment.job.referenceNumber}: ${reason}`,
+      {
+        assignmentId,
+        jobId: assignment.job.id,
+        action: InAppNotificationAction.REVIEW_REPLACEMENT,
       },
-      select: { id: true },
-    });
-    for (const user of opsUsers) {
-      await this.notifications.createInApp(
-        user.id,
-        'Replacement requested',
-        `Job ${assignment.job.referenceNumber}: ${reason}`,
-        { assignmentId, jobId: assignment.job.id, action: 'REVIEW_REPLACEMENT' },
-      );
-    }
+    );
 
     return result;
   }
@@ -556,18 +593,12 @@ export class AssignmentsService {
       afterState: { note },
     });
 
-    const guardianUser = await this.prisma.guardian.findUnique({
-      where: { id: assignment.guardianId },
-      select: { userId: true },
-    });
-    if (guardianUser) {
-      await this.notifications.createInApp(
-        guardianUser.userId,
-        'Replacement denied',
-        note ?? `Your replacement request for job ${assignment.job.referenceNumber} was denied.`,
-        { assignmentId, jobId: assignment.job.id },
-      );
-    }
+    await this.notifications.notifyGuardianInApp(
+      assignment.guardianId,
+      'Replacement denied',
+      note ?? `Your replacement request for job ${assignment.job.referenceNumber} was denied.`,
+      { assignmentId, jobId: assignment.job.id },
+    );
 
     return result;
   }
@@ -590,7 +621,7 @@ export class AssignmentsService {
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
-        status: AssignmentStatus.ON_SITE,
+        status: AssignmentStatus.AWAITING_RELIEF,
       });
       await tx.jobAssignment.update({
         where: { id: assignmentId },
@@ -620,7 +651,19 @@ export class AssignmentsService {
       entityId: assignmentId,
     });
 
+    const approved = await this.prisma.jobAssignment.findUnique({
+      where: { id: assignmentId },
+    });
+    assertSeekingReplacementState(approved, null);
+
     await this.dispatching.requestReplacementDispatch(assignment.jobId);
+
+    await this.notifications.notifyGuardianInApp(
+      assignment.guardianId,
+      'Replacement approved',
+      `Stay on site for job ${assignment.job.referenceNumber} until your replacement arrives.`,
+      { assignmentId, jobId: assignment.job.id },
+    );
 
     return { assignmentId, jobId: assignment.jobId, status: JobStatus.SEEKING_REPLACEMENT };
   }
@@ -631,6 +674,7 @@ export class AssignmentsService {
       id: string;
       jobId: string;
       guardianId: string;
+      status: AssignmentStatus;
       versionNumber: number;
       replacesAssignmentId: string | null;
       job: {
@@ -655,11 +699,13 @@ export class AssignmentsService {
     });
     if (
       !original ||
-      original.status !== AssignmentStatus.ON_SITE ||
+      original.status !== AssignmentStatus.AWAITING_RELIEF ||
       original.replacementResolution !== ReplacementResolution.APPROVED
     ) {
       throw new BadRequestException('Original assignment is not ready for handoff');
     }
+
+    assertSeekingReplacementState(original, substituteAssignment);
 
     const handoffAt = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -688,7 +734,10 @@ export class AssignmentsService {
       );
       await tx.job.update({
         where: { id: substituteAssignment.jobId },
-        data: { replacementDepartingAssignmentId: null },
+        data: {
+          replacementDepartingAssignmentId: null,
+          dispatchFailureReason: null,
+        },
       });
 
       await tx.guardianShiftState.update({
@@ -726,21 +775,12 @@ export class AssignmentsService {
       { entityType: 'job.job_assignments', entityId: substituteAssignmentId },
     );
 
-    const owners = await this.prisma.organizationUser.findMany({
-      where: {
-        organizationId: substituteAssignment.job.organizationId,
-        role: OrgMemberRole.CLIENT_OWNER,
-      },
-      select: { userId: true },
-    });
-    for (const owner of owners) {
-      await this.notifications.createInApp(
-        owner.userId,
-        'Officer replaced',
-        `A replacement officer is now on site for job ${substituteAssignment.job.referenceNumber}.`,
-        { jobId: substituteAssignment.job.id, assignmentId: substituteAssignmentId },
-      );
-    }
+    await this.notifications.notifyOrgOwnersInApp(
+      substituteAssignment.job.organizationId,
+      'Officer replaced',
+      `A replacement officer is now on site for job ${substituteAssignment.job.referenceNumber}.`,
+      { jobId: substituteAssignment.job.id, assignmentId: substituteAssignmentId },
+    );
 
     return result;
   }
@@ -753,11 +793,7 @@ export class AssignmentsService {
     if (!assignment || assignment.guardianId !== guardianId) {
       throw new NotFoundException('Assignment not found');
     }
-    if (
-      assignment.status === AssignmentStatus.ON_SITE &&
-      !assignment.replacesAssignmentId &&
-      assignment.job.status === JobStatus.SEEKING_REPLACEMENT
-    ) {
+    if (assignment.status === AssignmentStatus.AWAITING_RELIEF) {
       throw new BadRequestException('Remain on site until the replacement officer arrives');
     }
 

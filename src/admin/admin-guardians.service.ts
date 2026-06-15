@@ -27,6 +27,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CredentialDeliveryService } from '../notifications/credential-delivery.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CERTIFICATION_WITH_DOCUMENT_INCLUDE,
   mapCertificationForResponse,
@@ -47,6 +48,7 @@ export class AdminGuardiansService {
     private readonly passwords: PasswordService,
     private readonly credentials: CredentialDeliveryService,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(dto: CreateGuardianDto, actor: AuthUserPayload) {
@@ -272,6 +274,9 @@ export class AdminGuardiansService {
     if (dto.preferredShift !== undefined) {
       guardianUpdate.preferredShift = dto.preferredShift;
     }
+    if (dto.hourlyPayRate !== undefined) {
+      guardianUpdate.hourlyPayRate = dto.hourlyPayRate;
+    }
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -437,6 +442,12 @@ export class AdminGuardiansService {
       { fullName: guardian.user.fullName ?? undefined },
       { entityType: 'guardian.guardians', entityId: guardianId, userId: guardian.userId },
     );
+    await this.notifications.notifyUserInApp(
+      guardian.userId,
+      'Account activated',
+      'Your guardian account is active. Sign in to set your password and go on duty.',
+      { guardianId },
+    );
 
     return {
       guardianId,
@@ -479,6 +490,12 @@ export class AdminGuardiansService {
       EmailTemplateId.GUARDIAN_SUSPENDED,
       { fullName: guardian.user.fullName ?? undefined },
       { entityType: 'guardian.guardians', entityId: guardianId, userId: guardian.userId },
+    );
+    await this.notifications.notifyUserInApp(
+      guardian.userId,
+      'Account suspended',
+      'Your guardian account has been suspended. Contact operations if you need assistance.',
+      { guardianId },
     );
 
     return { guardianId, status: GuardianStatus.SUSPENDED };

@@ -42,8 +42,10 @@ import { OtpService } from './otp.service';
 import { normalizePhone } from './phone.util';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
+import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class RegisterOnboardingService {
@@ -56,6 +58,7 @@ export class RegisterOnboardingService {
     private readonly documents: DocumentsService,
     private readonly auth: AuthService,
     private readonly emails: EmailNotificationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   startRegistration(phone: string) {
@@ -549,6 +552,15 @@ export class RegisterOnboardingService {
         entityType: 'customer.organizations',
         entityId: ctx.organizationId,
         userId: ctx.userId,
+      },
+    );
+    await this.notifications.notifyUserInApp(
+      ctx.userId,
+      'Application submitted',
+      'Your business application has been submitted and is pending review.',
+      {
+        organizationId: ctx.organizationId,
+        action: InAppNotificationAction.VIEW_APPLICATION,
       },
     );
 

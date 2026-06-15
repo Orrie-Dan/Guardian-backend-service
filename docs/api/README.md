@@ -31,6 +31,8 @@ Use Swagger for request bodies, response shapes, and enums. Markdown docs here d
 | [admin-billing-policies.md](admin-billing-policies.md) | **Admin:** billing policy CRUD (billable hours models) |
 | [invoice-disputes.md](invoice-disputes.md) | Invoice dispute, void, and admin resolution |
 | [invoice-detail.md](invoice-detail.md) | Client invoice detail/summary JSON contract |
+| [replacement.md](replacement.md) | Replacement handoff workflow (ops approve, substitute dispatch) |
+| [early-release.md](early-release.md) | Early release workflow (client approve, end shift early) |
 | [admin-billing-ops.md](admin-billing-ops.md) | Billing anomaly scan and reconciliation report |
 | [auth.md](auth.md) | Sign-in, tokens |
 | [email-notifications.md](email-notifications.md) | Transactional email matrix and delivery semantics |

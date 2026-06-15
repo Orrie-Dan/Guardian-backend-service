@@ -176,6 +176,40 @@ Legacy route names: [api/changelog.md](api/changelog.md).
 
 ---
 
+## 4b. Replacement handoff (on-site officer)
+
+When a guardian on site cannot continue, they request a **replacement** (not early release). Ops approves or denies; on approve a substitute is dispatched while the original **stays on site** until handoff.
+
+```mermaid
+sequenceDiagram
+  participant Officer
+  participant API
+  participant Admin
+  participant Sub
+  participant Client
+
+  Officer->>API: POST /assignments/:id/replacement-request
+  API->>Admin: notify ops
+  Admin->>API: POST /admin/assignments/:id/replacement/approve
+  API->>Sub: replacement offer
+  Sub->>API: accept, en-route, on-site
+  Note over Officer: remains AWAITING_RELIEF until sub arrives
+  API->>Officer: relieved (COMPLETED)
+  API->>Client: email after handoff
+```
+
+| Stage | Who | Endpoint |
+|-------|-----|----------|
+| Request replacement | Guardian (`ON_SITE`) | `POST /assignments/:id/replacement-request` |
+| Review queue | Ops admin | `GET /admin/assignments/replacement-requests` |
+| Approve / deny | Ops admin | `POST /admin/assignments/:id/replacement/approve` or `.../deny` |
+| Substitute journey | Substitute guardian | Standard accept → en-route → on-site |
+| Client notification | System | After substitute on-site handoff only |
+
+Full API detail: [api/replacement.md](api/replacement.md). Contrast with client-approved early end: [api/early-release.md](api/early-release.md).
+
+---
+
 ## 5. Error codes (journey-related)
 
 | Code | Journey |

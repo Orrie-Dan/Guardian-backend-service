@@ -72,6 +72,7 @@ export const GUARDIAN_PERMISSIONS: readonly string[] = [
   'notifications:write',
   'documents:read',
   'documents:write',
+  'guardians:read_earnings',
 ] as const;
 
 export const OPS_ADMIN_PERMISSIONS: readonly string[] = [
@@ -91,6 +92,9 @@ export const OPS_ADMIN_PERMISSIONS: readonly string[] = [
   'admin:invoices:read',
   'admin:invoices:resolve_dispute',
   'admin:payments:read',
+  'admin:guardian_earnings:read',
+  'admin:guardian_payouts:read',
+  'admin:guardian_payouts:write',
   'billing:dispute',
   'jobs:read',
   'jobs:create',

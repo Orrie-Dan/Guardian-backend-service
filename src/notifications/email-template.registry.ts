@@ -126,6 +126,15 @@ export function renderEmailTemplate(
         ],
       });
 
+    case EmailTemplateId.GUARDIAN_PAYOUT_CONFIRMED:
+      return buildRenderedEmail('Your G2 Sentry payout was sent', {
+        greetingName: name,
+        paragraphs: [
+          `A payout of ${payload.currency ?? 'RWF'} ${payload.amount ?? ''} has been confirmed.`,
+          'Sign in to view your earnings history.',
+        ],
+      });
+
     case EmailTemplateId.JOB_CREATED:
       return buildRenderedEmail(`Job ${jobRef} created`, {
         greetingName: name,
@@ -168,6 +177,19 @@ export function renderEmailTemplate(
         paragraphs: [
           `A guardian on job ${jobRef} has requested a replacement.`,
           'Review and approve or deny in the admin console.',
+        ],
+        callouts: [
+          { label: 'Job reference', value: jobRef },
+          { label: 'Reason', value: String(payload.reason ?? '—') },
+        ],
+      });
+
+    case EmailTemplateId.ASSIGNMENT_REPLACEMENT_DISPATCH_PAUSED:
+      return buildRenderedEmail(`Replacement dispatch paused — job ${jobRef}`, {
+        greetingName: name,
+        paragraphs: [
+          `Automatic replacement dispatch for job ${jobRef} has been paused.`,
+          'A departing officer is still awaiting relief. Resume dispatch or cancel the job in the admin console.',
         ],
         callouts: [
           { label: 'Job reference', value: jobRef },

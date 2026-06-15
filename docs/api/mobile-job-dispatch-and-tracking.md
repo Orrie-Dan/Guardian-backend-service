@@ -82,23 +82,26 @@ GET /jobs/{jobId}
 ```typescript
 type JobStatus =
   | 'PENDING' | 'DISPATCHING' | 'ASSIGNED' | 'IN_PROGRESS'
+  | 'SEEKING_REPLACEMENT' | 'AWAITING_CONFIRMATION'
   | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 type AssignmentStatus =
   | 'OFFERED' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED'
-  | 'EN_ROUTE' | 'ON_SITE' | 'COMPLETED' | 'NO_SHOW' | 'CANCELLED';
+  | 'EN_ROUTE' | 'ON_SITE' | 'EARLY_RELEASE_REQUESTED'
+  | 'REPLACEMENT_REQUESTED' | 'COMPLETED' | 'NO_SHOW' | 'CANCELLED';
 
 function clientPhase(
   job: { status: JobStatus },
   assignments?: { status: AssignmentStatus }[],
 ) {
   const active = assignments?.some((a) =>
-    ['ACCEPTED', 'EN_ROUTE', 'ON_SITE'].includes(a.status),
+    ['ACCEPTED', 'EN_ROUTE', 'ON_SITE', 'REPLACEMENT_REQUESTED'].includes(a.status),
   );
   if (job.status === 'CANCELLED') return 'cancelled';
   if (job.status === 'COMPLETED') return 'completed';
+  if (job.status === 'AWAITING_CONFIRMATION') return 'awaiting_billing_confirmation';
   if (job.status === 'FAILED') return 'dispatch_failed';
-  if (active || job.status === 'ASSIGNED' || job.status === 'IN_PROGRESS') {
+  if (job.status === 'SEEKING_REPLACEMENT' || active || job.status === 'ASSIGNED' || job.status === 'IN_PROGRESS') {
     return 'guardian_assigned';
   }
   if (job.status === 'PENDING' || job.status === 'DISPATCHING') {
@@ -118,7 +121,7 @@ GET /jobs/{jobId}/tracking
 
 **Permission:** `jobs:read` (client staff/owner; no extra permission)
 
-**When:** Assignment status is `ACCEPTED`, `EN_ROUTE`, or `ON_SITE`.
+**When:** Assignment status is `ACCEPTED`, `EN_ROUTE`, or `ON_SITE` (including during `SEEKING_REPLACEMENT` while the original officer still covers).
 
 | Poll interval | Stop when |
 |---------------|-----------|
@@ -258,7 +261,10 @@ POST /assignments/{assignmentId}/decline
 POST /assignments/{assignmentId}/en-route
 POST /assignments/{assignmentId}/on-site
 POST /assignments/{assignmentId}/complete
+POST /assignments/{assignmentId}/replacement-request
 ```
+
+**Replacement:** while `ON_SITE`, guardian may request replacement (`replacement-request` + reason). Ops approves via admin API; substitute receives a normal offer. Original stays on site until substitute marks `on-site` (handoff). See [replacement.md](replacement.md).
 
 Keep **heartbeat** during the whole assignment so the **client map** stays fresh.
 
@@ -288,6 +294,7 @@ Use for **history / activity** screens. Active work and offers still come from `
 | Offers | `GET /assignments/me` (poll 3–5 s) |
 | Accept / decline | `POST /assignments/:id/accept` \| `decline` |
 | Job steps | `en-route` → `on-site` → `complete` |
+| Request replacement | `POST /assignments/:id/replacement-request` (on site only) |
 | Background GPS | `POST /guardians/me/heartbeat` |
 
 ---

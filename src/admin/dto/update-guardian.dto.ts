@@ -11,6 +11,7 @@ import {
   IsEmail,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -74,4 +75,10 @@ export class UpdateGuardianDto {
   @IsOptional()
   @IsEnum(PreferredShift)
   preferredShift?: PreferredShift;
+
+  @ApiPropertyOptional({ description: 'Hourly pay rate in pay currency (RWF)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  hourlyPayRate?: number;
 }

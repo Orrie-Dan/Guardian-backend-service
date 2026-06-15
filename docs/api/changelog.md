@@ -2,6 +2,34 @@
 
 All routes remain under `/api/v1`.
 
+## Replacement `AWAITING_RELIEF` status
+
+| Method | Path | Permission |
+|--------|------|------------|
+| POST | `/admin/jobs/:id/replacement/resume-dispatch` | `admin:assignments:replacement` |
+
+- New assignment status: `AWAITING_RELIEF` — departing guardian after ops approves replacement (replaces ambiguous second `ON_SITE`).
+- Ops approve now transitions `REPLACEMENT_REQUESTED -> AWAITING_RELIEF` (not `ON_SITE`).
+- Replacement dispatch auto-pauses on offer cap (`MAX_REPLACEMENT_OFFERS_PER_JOB`) or deadline; ops resume via endpoint above.
+- Job cancel during `SEEKING_REPLACEMENT` cancels departing + substitute pipeline.
+- Migration: `20260611140000_awaiting_relief`. Docs: [replacement.md](replacement.md).
+
+## Guardian earnings and payouts
+
+| Method | Path | Permission |
+|--------|------|------------|
+| GET | `/guardians/me/earnings` | `guardians:read_earnings` |
+| GET | `/guardians/me/earnings/ledger` | `guardians:read_earnings` |
+| GET | `/guardians/me/payouts` | `guardians:read_earnings` |
+| GET | `/admin/guardians/:id/earnings` | `admin:guardian_earnings:read` |
+| POST | `/admin/guardians/:id/payouts` | `admin:guardian_payouts:write` |
+| GET | `/admin/guardian-payouts` | `admin:guardian_payouts:read` |
+| POST | `/admin/guardian-payouts/:id/confirm` | `admin:guardian_payouts:write` |
+
+- Earnings accrue on client `POST /payments/:id/confirm` (invoice `PAID`).
+- Pay formula: assignment payable hours × `hourlyPayRate` on guardian profile (`PATCH /admin/guardians/:id`).
+- Migration: `20260611120000_guardian_earnings_payouts`.
+
 > **Billing phases 1–6:** deploy checklist, flows, and frontend integration → [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md)
 
 ## Registration v2 (breaking)

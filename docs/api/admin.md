@@ -38,6 +38,19 @@ Both responses include `items` and `generatedAt` (ISO timestamp).
 
 **Client apps** do not use the admin map for a single booked job. After a guardian accepts, clients poll **`GET /jobs/:jobId/tracking`** (`jobs:read`) for job-scoped guardian position and ETA. See [jobs.md](jobs.md) and [mobile-job-dispatch-and-tracking.md](mobile-job-dispatch-and-tracking.md).
 
+## Assignment replacement (ops)
+
+When an on-site guardian cannot continue, they request replacement; ops approves or denies and dispatch finds a substitute while the original stays on site. Full flow: [replacement.md](replacement.md).
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/admin/assignments/replacement-requests` | `admin:assignments:replacement` | Pending replacement requests |
+| POST | `/admin/assignments/:id/replacement/approve` | `admin:assignments:replacement` | Approve and queue replacement dispatch |
+| POST | `/admin/assignments/:id/replacement/deny` | `admin:assignments:replacement` | Deny; optional `note` in body |
+| POST | `/admin/jobs/:id/replacement/resume-dispatch` | `admin:assignments:replacement` | Clear dispatch pause and re-queue substitute search |
+
+Re-run `npm run db:seed` after deploy so `admin:assignments:replacement` exists for ops roles.
+
 ---
 
 ## Guardian onboarding
@@ -110,6 +123,17 @@ The admin controller also exposes pricing, billing policies, audit, analytics, a
 | Pricing rates (hourly/flat) | [admin-pricing.md](admin-pricing.md) |
 | Billing policies (billable hours model) | [admin-billing-policies.md](admin-billing-policies.md) |
 | Billing ops (anomalies + reconciliation) | [admin-billing-ops.md](admin-billing-ops.md) |
+
+### Guardian payroll (ops)
+
+| Method | Path | Permission | Notes |
+|--------|------|------------|-------|
+| GET | `/admin/guardians/:id/earnings` | `admin:guardian_earnings:read` | Paginated ledger (same shape as guardian `…/earnings/ledger`) |
+| POST | `/admin/guardians/:id/payouts` | `admin:guardian_payouts:write` | Body: `{ earningIds[], provider, idempotencyKey, externalTxnId? }` |
+| GET | `/admin/guardian-payouts` | `admin:guardian_payouts:read` | Optional `guardianId` query filter |
+| POST | `/admin/guardian-payouts/:id/confirm` | `admin:guardian_payouts:write` | Marks payout completed; earnings → `PAID` |
+
+Set guardian pay rate: `PATCH /admin/guardians/:id` with `hourlyPayRate` (RWF per billable hour).
 
 ## Analytics contract (ops/admin)
 

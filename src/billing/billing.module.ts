@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { GuardianPayrollModule } from '../guardian-payroll/guardian-payroll.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { BillingCoreModule } from './billing-core.module';
@@ -10,6 +11,7 @@ import { BillingService } from './billing.service';
 @Module({
   imports: [
     BillingCoreModule,
+    GuardianPayrollModule,
     NotificationsModule,
     forwardRef(() => OutboxModule),
   ],
