@@ -12,6 +12,7 @@ async function bootstrap() {
       'http://localhost:3000',
       'http://localhost:5173',
       'http://127.0.0.1:3000',
+      'https://g2sentry-admin.vercel.app',
     ],
     credentials: true,
   });
