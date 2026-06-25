@@ -20,6 +20,7 @@ import { BillingService } from '../billing/billing.service';
 import { AuditService } from '../common/services/audit.service';
 import { ResourceOwnerPolicy } from '../common/policies/resource-owner.policy';
 import { ShiftStateService } from '../guardians/shift-state.service';
+import { GuardianPayPolicyService } from '../guardian-payroll/guardian-pay-policy.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
@@ -69,6 +70,7 @@ export class AssignmentsService {
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => DispatchingService))
     private readonly dispatching: DispatchingService,
+    private readonly payPolicy: GuardianPayPolicyService,
   ) {}
 
   async findForGuardian(guardianId: string) {
@@ -125,9 +127,28 @@ export class AssignmentsService {
         throw new BadRequestException('Offer has expired');
       }
 
+      const guardian = await tx.guardian.findUnique({
+        where: { id: guardianId },
+        select: { employmentType: true, hourlyPayRate: true },
+      });
+      if (!guardian) {
+        throw new NotFoundException('Guardian not found');
+      }
+
+      const resolvedPayPolicy = await this.payPolicy.resolvePayPolicy(
+        assignment.job.jobType,
+        guardian.employmentType,
+        assignment.job.scheduledStart,
+      );
+
       const updated = await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
         status: AssignmentStatus.ACCEPTED,
         acceptedAt: new Date(),
+        payPolicyModel: resolvedPayPolicy.model,
+        payMinimumHours: resolvedPayPolicy.minimumHours,
+        payPolicyResolvedAt: new Date(),
+        hourlyPayRateAtCommit: guardian.hourlyPayRate,
+        payApplyOnEarlyRelease: resolvedPayPolicy.applyOnEarlyRelease,
       });
 
       await tx.guardianShiftState.update({
@@ -991,6 +1012,11 @@ export class AssignmentsService {
     data: {
       status?: AssignmentStatus;
       acceptedAt?: Date;
+      payPolicyModel?: Prisma.JobAssignmentUpdateInput['payPolicyModel'];
+      payMinimumHours?: Prisma.Decimal;
+      payPolicyResolvedAt?: Date;
+      hourlyPayRateAtCommit?: Prisma.Decimal | null;
+      payApplyOnEarlyRelease?: boolean;
     },
   ) {
     const result = await tx.jobAssignment.updateMany({
@@ -998,6 +1024,11 @@ export class AssignmentsService {
       data: {
         status: data.status,
         acceptedAt: data.acceptedAt,
+        payPolicyModel: data.payPolicyModel,
+        payMinimumHours: data.payMinimumHours,
+        payPolicyResolvedAt: data.payPolicyResolvedAt,
+        hourlyPayRateAtCommit: data.hourlyPayRateAtCommit,
+        payApplyOnEarlyRelease: data.payApplyOnEarlyRelease,
         versionNumber: { increment: 1 },
       },
     });

@@ -14,6 +14,7 @@ import { AdminMapService } from './admin-map.service';
 import { AdminGuardiansService } from './admin-guardians.service';
 import { AdminUsersService } from './admin-users.service';
 import { AdminBillingPoliciesService } from './admin-billing-policies.service';
+import { AdminPayPoliciesService } from './admin-pay-policies.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminVerificationService } from './admin-verification.service';
 import { AdminReplacementService } from './admin-replacement.service';
@@ -39,6 +40,7 @@ import { AssignmentsModule } from '../assignments/assignments.module';
     AdminVerificationService,
     AdminPricingService,
     AdminBillingPoliciesService,
+    AdminPayPoliciesService,
     AdminAuditService,
     AdminAnalyticsService,
     AdminReplacementService,

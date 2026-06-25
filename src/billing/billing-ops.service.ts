@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { AssignmentStatus } from '@prisma/client';
+import { AssignmentStatus, PayPolicyModel } from '@prisma/client';
+import { isEarlyReleaseApproved } from '../assignments/early-release.util';
 import { AuditService } from '../common/services/audit.service';
+import { computePayableDuration } from '../guardian-payroll/guardian-payroll-calculation.util';
+import { GUARDIAN_PAY_MINIMUM_HOURS_FALLBACK } from '../guardian-payroll/guardian-payroll.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BILLING_ALERT_EARLY_COMPLETION,
@@ -36,6 +39,9 @@ export type BillingReconciliationRow = {
   actualHours: number | null;
   billableHours: number | null;
   billingBasis: string | null;
+  payableHours: number | null;
+  payBasis: string | null;
+  guardianPayAmount: string | null;
   invoiceStatus: string | null;
   invoiceTotal: string | null;
   earlyCompletion: boolean;
@@ -179,6 +185,7 @@ export class BillingOpsService {
         guardian: {
           include: { user: { select: { fullName: true } } },
         },
+        earning: true,
       },
       orderBy: { completedAt: 'desc' },
     });
@@ -193,6 +200,39 @@ export class BillingOpsService {
           : null;
       const early = this.detectEarlyCompletion(assignment);
       const late = assignment.arrivedAt ? this.detectLateArrival(assignment) : null;
+
+      let payableHours: number | null = decimalToNumber(assignment.earning?.payableHours);
+      let payBasis: string | null = assignment.earning?.payBasis ?? null;
+      let guardianPayAmount: string | null = assignment.earning?.amount?.toString() ?? null;
+
+      if (
+        payableHours == null &&
+        assignment.arrivedAt &&
+        assignment.completedAt
+      ) {
+        const policyModel =
+          assignment.payPolicyModel ?? PayPolicyModel.MINIMUM_GUARANTEED;
+        const minimumHours = assignment.payMinimumHours
+          ? Number(assignment.payMinimumHours)
+          : GUARDIAN_PAY_MINIMUM_HOURS_FALLBACK;
+        const duration = computePayableDuration(
+          policyModel,
+          minimumHours,
+          job.scheduledStart,
+          job.scheduledEnd,
+          assignment.arrivedAt,
+          assignment.completedAt,
+          isEarlyReleaseApproved(assignment.earlyReleaseResolution),
+          assignment.payApplyOnEarlyRelease ?? true,
+        );
+        payableHours = duration.payableHours;
+        payBasis = duration.payBasis;
+        const rate =
+          assignment.hourlyPayRateAtCommit ?? assignment.guardian.hourlyPayRate;
+        if (rate != null) {
+          guardianPayAmount = (payableHours * Number(rate)).toFixed(2);
+        }
+      }
 
       return {
         assignmentId: assignment.id,
@@ -212,6 +252,9 @@ export class BillingOpsService {
         actualHours,
         billableHours: decimalToNumber(invoice?.billableHours) ?? actualHours,
         billingBasis: invoice?.billingBasis ?? null,
+        payableHours,
+        payBasis,
+        guardianPayAmount,
         invoiceStatus: invoice?.status ?? null,
         invoiceTotal: invoice?.total?.toString() ?? null,
         earlyCompletion: early != null,
@@ -228,6 +271,7 @@ export class BillingOpsService {
       totalScheduledHours: items.reduce((s, r) => s + r.scheduledHours, 0),
       totalActualHours: items.reduce((s, r) => s + (r.actualHours ?? 0), 0),
       totalBillableHours: items.reduce((s, r) => s + (r.billableHours ?? 0), 0),
+      totalPayableHours: items.reduce((s, r) => s + (r.payableHours ?? 0), 0),
     };
 
     return {

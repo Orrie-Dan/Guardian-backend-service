@@ -12,6 +12,7 @@ import { OutboxService } from '../outbox/outbox.service';
 import { QueueService } from '../queue/queue.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignmentsService } from './assignments.service';
+import { GuardianPayPolicyService } from '../guardian-payroll/guardian-pay-policy.service';
 import { NoShowReasonCode } from './dto/no-show.dto';
 
 describe('AssignmentsService', () => {
@@ -27,11 +28,11 @@ describe('AssignmentsService', () => {
       update: jest.fn(),
     },
     guardianShiftState: { update: jest.fn() },
+    guardian: { findUnique: jest.fn() },
     guardianPerformanceDaily: {
       upsert: jest.fn(),
     },
     user: { findMany: jest.fn() },
-    guardian: { findUnique: jest.fn() },
     organizationUser: { findMany: jest.fn() },
     job: { update: jest.fn() },
   };
@@ -60,6 +61,13 @@ describe('AssignmentsService', () => {
     requestReplacementDispatch: jest.fn(),
     isReplacementDispatchPaused: jest.fn().mockReturnValue(false),
   };
+  const payPolicy = {
+    resolvePayPolicy: jest.fn().mockResolvedValue({
+      model: 'MINIMUM_GUARANTEED',
+      minimumHours: { toString: () => '1' },
+      applyOnEarlyRelease: true,
+    }),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -76,6 +84,7 @@ describe('AssignmentsService', () => {
         { provide: EmailNotificationService, useValue: emails },
         { provide: NotificationsService, useValue: notifications },
         { provide: DispatchingService, useValue: dispatching },
+        { provide: GuardianPayPolicyService, useValue: payPolicy },
       ],
     }).compile();
 
@@ -95,7 +104,16 @@ describe('AssignmentsService', () => {
       status: AssignmentStatus.OFFERED,
       versionNumber: 1,
       expiresAt: new Date(Date.now() + 60_000),
-      job: { id: 'job-1', status: JobStatus.DISPATCHING },
+      job: {
+        id: 'job-1',
+        status: JobStatus.DISPATCHING,
+        jobType: 'PATROL',
+        scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
+      },
+    });
+    prisma.guardian.findUnique.mockResolvedValue({
+      employmentType: 'PART_TIME',
+      hourlyPayRate: 5000,
     });
     prisma.jobAssignment.findMany.mockResolvedValue([
       { id: 'a-2', guardianId: 'g-2' },
@@ -114,6 +132,7 @@ describe('AssignmentsService', () => {
     expect(shiftState.setAvailable).toHaveBeenCalledWith('g-2');
     expect(shiftState.setAvailable).toHaveBeenCalledWith('g-3');
     expect(shiftState.setAvailable).not.toHaveBeenCalledWith('g-1');
+    expect(payPolicy.resolvePayPolicy).toHaveBeenCalled();
   });
 
   it('completes assignment and then completes job lifecycle', async () => {

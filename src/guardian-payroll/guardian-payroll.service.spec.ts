@@ -5,6 +5,7 @@ import {
   GuardianEarningStatus,
   GuardianPayoutStatus,
   InvoiceStatus,
+  PayPolicyModel,
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../common/services/audit.service';
@@ -12,6 +13,7 @@ import { EmailNotificationService } from '../notifications/email-notification.se
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { GuardianPayrollService } from './guardian-payroll.service';
+import { GuardianPayPolicyService } from './guardian-pay-policy.service';
 
 describe('GuardianPayrollService', () => {
   let service: GuardianPayrollService;
@@ -40,6 +42,7 @@ describe('GuardianPayrollService', () => {
   const audit = { log: jest.fn() };
   const emails = { sendToUser: jest.fn() };
   const notifications = { notifyGuardianInApp: jest.fn() };
+  const payPolicy = { resolvePayPolicy: jest.fn(), fallbackPayPolicy: jest.fn() };
 
   const scheduledStart = new Date('2026-06-01T08:00:00.000Z');
   const scheduledEnd = new Date('2026-06-01T16:00:00.000Z');
@@ -52,6 +55,7 @@ describe('GuardianPayrollService', () => {
         { provide: AuditService, useValue: audit },
         { provide: EmailNotificationService, useValue: emails },
         { provide: NotificationsService, useValue: notifications },
+        { provide: GuardianPayPolicyService, useValue: payPolicy },
       ],
     }).compile();
 
@@ -69,7 +73,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd },
+        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -77,7 +81,17 @@ describe('GuardianPayrollService', () => {
           guardianId: 'g-1',
           arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
           completedAt: new Date('2026-06-01T11:00:00.000Z'),
-          guardian: { hourlyPayRate: new Prisma.Decimal(5000), payCurrency: 'RWF' },
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: new Prisma.Decimal(5000),
+          acceptedAt: new Date('2026-06-01T07:00:00.000Z'),
+          guardian: {
+            hourlyPayRate: new Prisma.Decimal(5000),
+            payCurrency: 'RWF',
+            employmentType: 'PART_TIME',
+          },
         },
       ]);
       prisma.guardianEarning.findUnique.mockResolvedValue(null);
@@ -97,13 +111,57 @@ describe('GuardianPayrollService', () => {
       );
     });
 
+    it('applies minimum guaranteed pay from assignment snapshot', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        id: 'inv-1',
+        jobId: 'job-1',
+        status: InvoiceStatus.PAID,
+        currency: 'RWF',
+        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+      });
+      prisma.jobAssignment.findMany.mockResolvedValue([
+        {
+          id: 'asg-1',
+          guardianId: 'g-1',
+          arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
+          completedAt: new Date('2026-06-01T08:30:00.000Z'),
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: new Prisma.Decimal(5000),
+          acceptedAt: new Date('2026-06-01T07:00:00.000Z'),
+          guardian: {
+            hourlyPayRate: new Prisma.Decimal(5000),
+            payCurrency: 'RWF',
+            employmentType: 'PART_TIME',
+          },
+        },
+      ]);
+      prisma.guardianEarning.findUnique.mockResolvedValue(null);
+      prisma.guardianEarning.create.mockResolvedValue({ id: 'earn-1' });
+
+      await service.accrueForPaidInvoice('inv-1');
+
+      expect(prisma.guardianEarning.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            payableHours: new Prisma.Decimal(1),
+            actualHours: new Prisma.Decimal(0.5),
+            amount: new Prisma.Decimal(5000),
+            payBasis: 'MINIMUM_GUARANTEED',
+          }),
+        }),
+      );
+    });
+
     it('creates BLOCKED earning when guardian has no hourly rate', async () => {
       prisma.invoice.findUnique.mockResolvedValue({
         id: 'inv-1',
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd },
+        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -111,7 +169,13 @@ describe('GuardianPayrollService', () => {
           guardianId: 'g-1',
           arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
           completedAt: new Date('2026-06-01T10:00:00.000Z'),
-          guardian: { hourlyPayRate: null, payCurrency: 'RWF' },
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: null,
+          acceptedAt: new Date('2026-06-01T07:00:00.000Z'),
+          guardian: { hourlyPayRate: null, payCurrency: 'RWF', employmentType: 'PART_TIME' },
         },
       ]);
       prisma.guardianEarning.findUnique.mockResolvedValue(null);
@@ -138,7 +202,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd },
+        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -146,7 +210,17 @@ describe('GuardianPayrollService', () => {
           guardianId: 'g-1',
           arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
           completedAt: new Date('2026-06-01T10:00:00.000Z'),
-          guardian: { hourlyPayRate: new Prisma.Decimal(5000), payCurrency: 'RWF' },
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: new Prisma.Decimal(5000),
+          acceptedAt: new Date('2026-06-01T07:00:00.000Z'),
+          guardian: {
+            hourlyPayRate: new Prisma.Decimal(5000),
+            payCurrency: 'RWF',
+            employmentType: 'PART_TIME',
+          },
         },
       ]);
       prisma.guardianEarning.findUnique.mockResolvedValue({ id: 'earn-existing' });

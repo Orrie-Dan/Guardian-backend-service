@@ -726,6 +726,11 @@ model JobAssignment {
   replacementResolution     ReplacementResolution?  @map("replacement_resolution")
   replacementResolvedByUserId String?               @map("replacement_resolved_by_user_id") @db.Uuid
   replacesAssignmentId      String?                 @map("replaces_assignment_id") @db.Uuid
+  payPolicyModel            PayPolicyModel?         @map("pay_policy_model")
+  payMinimumHours           Decimal?                @map("pay_minimum_hours") @db.Decimal(6, 2)
+  payPolicyResolvedAt       DateTime?               @map("pay_policy_resolved_at")
+  hourlyPayRateAtCommit     Decimal?                @map("hourly_pay_rate_at_commit") @db.Decimal(10, 2)
+  payApplyOnEarlyRelease    Boolean?                @map("pay_apply_on_early_release")
 
   job                 Job              @relation(fields: [jobId], references: [id])
   guardian            Guardian         @relation(fields: [guardianId], references: [id])
@@ -870,6 +875,13 @@ enum BillingPolicyModel {
   @@schema("billing")
 }
 
+enum PayPolicyModel {
+  ACTUAL_TIME
+  MINIMUM_GUARANTEED
+
+  @@schema("billing")
+}
+
 model BillingPolicy {
   id                                String             @id @default(uuid()) @db.Uuid
   priority                          Int                @db.SmallInt
@@ -888,6 +900,22 @@ model BillingPolicy {
 
   @@index([priority(sort: Desc)])
   @@map("billing_policies")
+  @@schema("billing")
+}
+
+model PayPolicy {
+  id                   String         @id @default(uuid()) @db.Uuid
+  priority             Int            @db.SmallInt
+  jobType              JobType?       @map("job_type")
+  employmentType       EmploymentType? @map("employment_type")
+  validFrom            DateTime       @default(now()) @map("valid_from") @db.Date
+  validUntil           DateTime?      @map("valid_until") @db.Date
+  model                PayPolicyModel
+  minimumHours         Decimal        @default(1) @map("minimum_hours") @db.Decimal(6, 2)
+  applyOnEarlyRelease  Boolean        @default(true) @map("apply_on_early_release")
+
+  @@index([priority(sort: Desc)])
+  @@map("pay_policies")
   @@schema("billing")
 }
 
@@ -986,6 +1014,11 @@ model GuardianEarning {
   jobId         String                @map("job_id") @db.Uuid
   invoiceId     String                @map("invoice_id") @db.Uuid
   payableHours  Decimal               @map("payable_hours") @db.Decimal(8, 4)
+  actualHours   Decimal?              @map("actual_hours") @db.Decimal(8, 4)
+  scheduledHours Decimal?             @map("scheduled_hours") @db.Decimal(8, 4)
+  payMinimumHours Decimal?            @map("pay_minimum_hours") @db.Decimal(6, 2)
+  payPolicyModel PayPolicyModel?      @map("pay_policy_model")
+  payBasis      String?               @map("pay_basis") @db.VarChar(40)
   hourlyPayRate Decimal?              @map("hourly_pay_rate") @db.Decimal(10, 2)
   amount        Decimal               @db.Decimal(12, 2)
   currency      String                @default("RWF") @db.Char(3)

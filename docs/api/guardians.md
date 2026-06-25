@@ -130,7 +130,11 @@ Prefer polling `GET …/location` during an active job; send heartbeats with `la
 
 ## Earnings lifecycle
 
-Earnings accrue when the **client invoice is paid** (`POST /payments/:id/confirm`). Amount = assignment payable hours × guardian `hourlyPayRate` (set by ops via `PATCH /admin/guardians/:id`). Status `BLOCKED` if no rate was configured at accrual time. Ops disburses via `POST /admin/guardians/:id/payouts` then `POST /admin/guardian-payouts/:id/confirm`.
+Earnings accrue when the **client invoice is paid** (`POST /payments/:id/confirm`). Payable hours follow the **pay policy snapshotted at offer accept** (`MINIMUM_GUARANTEED` platform default: 1-hour floor once on site). Amount = payable hours × `hourlyPayRateAtCommit` (or current rate if legacy assignment). Status `BLOCKED` if no rate was configured at accrual time. Ops disburses via `POST /admin/guardians/:id/payouts` then `POST /admin/guardian-payouts/:id/confirm`.
+
+Ledger lines include `actualHours`, `payableHours`, `payMinimumHours`, `payBasis`, and `payPolicyModel` for transparency.
+
+Pay policy admin API: [admin-pay-policies.md](admin-pay-policies.md).
 
 ---
 

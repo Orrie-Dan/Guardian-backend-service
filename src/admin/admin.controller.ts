@@ -27,6 +27,7 @@ import { BillingService } from '../billing/billing.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
 import { AdminBillingPoliciesService } from './admin-billing-policies.service';
+import { AdminPayPoliciesService } from './admin-pay-policies.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminMapService } from './admin-map.service';
 import { AdminGuardiansService } from './admin-guardians.service';
@@ -46,8 +47,10 @@ import { ListVerificationCertificationsQueryDto } from './dto/list-verification-
 import { ReviewVerificationDto } from './dto/review-verification.dto';
 import { AnalyticsBackfillDto } from './dto/analytics-backfill.dto';
 import { CreateBillingPolicyDto } from './dto/create-billing-policy.dto';
+import { CreatePayPolicyDto } from './dto/create-pay-policy.dto';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
 import { UpdateBillingPolicyDto } from './dto/update-billing-policy.dto';
+import { UpdatePayPolicyDto } from './dto/update-pay-policy.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
 import { MapGuardiansQueryDto } from './dto/map-guardians-query.dto';
 import { MapSitesQueryDto } from './dto/map-sites-query.dto';
@@ -79,6 +82,7 @@ export class AdminController {
     private readonly documents: DocumentsService,
     private readonly pricing: AdminPricingService,
     private readonly billingPolicies: AdminBillingPoliciesService,
+    private readonly payPolicies: AdminPayPoliciesService,
     private readonly audit: AdminAuditService,
     private readonly analytics: AdminAnalyticsService,
     private readonly billing: BillingService,
@@ -433,6 +437,31 @@ export class AdminController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.billingPolicies.update(id, body, user.sub);
+  }
+
+  @Get('pay-policies')
+  @RequirePermissions('admin:billing:read')
+  listPayPolicies() {
+    return this.payPolicies.list();
+  }
+
+  @Post('pay-policies')
+  @RequirePermissions('admin:billing:write')
+  createPayPolicy(
+    @Body() body: CreatePayPolicyDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.payPolicies.create(body, user.sub);
+  }
+
+  @Patch('pay-policies/:id')
+  @RequirePermissions('admin:billing:write')
+  updatePayPolicy(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdatePayPolicyDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.payPolicies.update(id, body, user.sub);
   }
 
   @Get('billing/reconciliation')

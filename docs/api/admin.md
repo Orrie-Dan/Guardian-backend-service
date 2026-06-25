@@ -122,6 +122,7 @@ The admin controller also exposes pricing, billing policies, audit, analytics, a
 |-------|--------|
 | Pricing rates (hourly/flat) | [admin-pricing.md](admin-pricing.md) |
 | Billing policies (billable hours model) | [admin-billing-policies.md](admin-billing-policies.md) |
+| Pay policies (guardian payable hours) | [admin-pay-policies.md](admin-pay-policies.md) |
 | Billing ops (anomalies + reconciliation) | [admin-billing-ops.md](admin-billing-ops.md) |
 
 ### Guardian payroll (ops)

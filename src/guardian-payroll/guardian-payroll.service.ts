@@ -22,7 +22,9 @@ import { EmailTemplateId } from '../notifications/email-template.ids';
 import { InAppNotificationAction } from '../notifications/in-app-notification.actions';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { computePayableHours } from './guardian-payroll-calculation.util';
+import { isEarlyReleaseApproved } from '../assignments/early-release.util';
+import { GuardianPayPolicyService } from './guardian-pay-policy.service';
+import { computePayableDuration } from './guardian-payroll-calculation.util';
 import { CreateGuardianPayoutDto } from './dto/create-guardian-payout.dto';
 import { ListEarningsQueryDto } from './dto/list-earnings-query.dto';
 
@@ -33,6 +35,7 @@ export class GuardianPayrollService {
     private readonly audit: AuditService,
     private readonly emails: EmailNotificationService,
     private readonly notifications: NotificationsService,
+    private readonly payPolicy: GuardianPayPolicyService,
   ) {}
 
   async accrueForPaidInvoice(invoiceId: string) {
@@ -68,18 +71,41 @@ export class GuardianPayrollService {
         continue;
       }
 
-      const payableHours = computePayableHours(
+      const policy =
+        assignment.payPolicyModel != null && assignment.payMinimumHours != null
+          ? {
+              model: assignment.payPolicyModel,
+              minimumHours: assignment.payMinimumHours,
+              applyOnEarlyRelease: assignment.payApplyOnEarlyRelease ?? true,
+            }
+          : await this.payPolicy
+              .resolvePayPolicy(
+                invoice.job.jobType,
+                assignment.guardian.employmentType,
+                assignment.acceptedAt ?? invoice.job.scheduledStart,
+              )
+              .catch(() => this.payPolicy.fallbackPayPolicy());
+
+      const earlyReleaseApproved = isEarlyReleaseApproved(
+        assignment.earlyReleaseResolution,
+      );
+      const duration = computePayableDuration(
+        policy.model,
+        Number(policy.minimumHours),
         invoice.job.scheduledStart,
         invoice.job.scheduledEnd,
         assignment.arrivedAt!,
         assignment.completedAt!,
+        earlyReleaseApproved,
+        policy.applyOnEarlyRelease,
       );
-      const hourlyPayRate = assignment.guardian.hourlyPayRate;
+      const hourlyPayRate =
+        assignment.hourlyPayRateAtCommit ?? assignment.guardian.hourlyPayRate;
       const currency = assignment.guardian.payCurrency ?? invoice.currency;
       const blocked = hourlyPayRate == null;
       const amount = blocked
         ? new Prisma.Decimal(0)
-        : new Prisma.Decimal(payableHours).mul(hourlyPayRate);
+        : new Prisma.Decimal(duration.payableHours).mul(hourlyPayRate);
 
       const earning = await this.prisma.guardianEarning.create({
         data: {
@@ -87,7 +113,12 @@ export class GuardianPayrollService {
           assignmentId: assignment.id,
           jobId: invoice.jobId,
           invoiceId: invoice.id,
-          payableHours: new Prisma.Decimal(payableHours),
+          payableHours: new Prisma.Decimal(duration.payableHours),
+          actualHours: new Prisma.Decimal(duration.actualHours),
+          scheduledHours: new Prisma.Decimal(duration.scheduledHours),
+          payMinimumHours: new Prisma.Decimal(duration.minimumHours),
+          payPolicyModel: policy.model,
+          payBasis: duration.payBasis,
           hourlyPayRate,
           amount,
           currency,
@@ -105,7 +136,9 @@ export class GuardianPayrollService {
         afterState: {
           guardianId: assignment.guardianId,
           assignmentId: assignment.id,
-          payableHours,
+          payableHours: duration.payableHours,
+          actualHours: duration.actualHours,
+          payBasis: duration.payBasis,
           amount: amount.toString(),
           currency,
         },
@@ -241,6 +274,11 @@ export class GuardianPayrollService {
         jobReference: row.job.referenceNumber,
         assignmentId: row.assignmentId,
         payableHours: row.payableHours.toString(),
+        actualHours: row.actualHours?.toString() ?? null,
+        scheduledHours: row.scheduledHours?.toString() ?? null,
+        payMinimumHours: row.payMinimumHours?.toString() ?? null,
+        payPolicyModel: row.payPolicyModel,
+        payBasis: row.payBasis,
         hourlyPayRate: row.hourlyPayRate?.toString() ?? null,
         amount: row.amount.toString(),
         currency: row.currency,

@@ -25,10 +25,14 @@ All routes remain under `/api/v1`.
 | POST | `/admin/guardians/:id/payouts` | `admin:guardian_payouts:write` |
 | GET | `/admin/guardian-payouts` | `admin:guardian_payouts:read` |
 | POST | `/admin/guardian-payouts/:id/confirm` | `admin:guardian_payouts:write` |
+| GET | `/admin/pay-policies` | `admin:billing:read` |
+| POST | `/admin/pay-policies` | `admin:billing:write` |
+| PATCH | `/admin/pay-policies/:id` | `admin:billing:write` |
 
 - Earnings accrue on client `POST /payments/:id/confirm` (invoice `PAID`).
-- Pay formula: assignment payable hours × `hourlyPayRate` on guardian profile (`PATCH /admin/guardians/:id`).
-- Migration: `20260611120000_guardian_earnings_payouts`.
+- Pay formula: payable hours (pay policy at accept) × snapshotted hourly rate.
+- Platform default pay policy: `MINIMUM_GUARANTEED`, 1-hour minimum.
+- Migration: `20260625120000_guardian_pay_policies`.
 
 > **Billing phases 1–6:** deploy checklist, flows, and frontend integration → [../billing-overhaul-implementation.md](../billing-overhaul-implementation.md)
 

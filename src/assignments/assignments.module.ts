@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module';
+import { GuardianPayrollModule } from '../guardian-payroll/guardian-payroll.module';
 import { GuardiansModule } from '../guardians/guardians.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -14,6 +15,7 @@ import { NoShowAutomationService } from './no-show-automation.service';
 @Module({
   imports: [
     BillingModule,
+    GuardianPayrollModule,
     NotificationsModule,
     OutboxModule,
     QueueModule,

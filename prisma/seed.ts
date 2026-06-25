@@ -6,6 +6,7 @@ import {
   OrgMemberRole,
   OrgType,
   BillingPolicyModel,
+  PayPolicyModel,
   PricingModel,
   PrismaClient,
   RoleCode,
@@ -249,6 +250,22 @@ async function main() {
     update: {
       model: BillingPolicyModel.MINIMUM_GUARANTEED,
       minimumHours: 2,
+    },
+  });
+
+  await prisma.payPolicy.upsert({
+    where: { id: '00000000-0000-4000-8000-000000000300' },
+    create: {
+      id: '00000000-0000-4000-8000-000000000300',
+      priority: 1,
+      model: PayPolicyModel.MINIMUM_GUARANTEED,
+      minimumHours: 1,
+      jobType: null,
+      employmentType: null,
+    },
+    update: {
+      model: PayPolicyModel.MINIMUM_GUARANTEED,
+      minimumHours: 1,
     },
   });
 

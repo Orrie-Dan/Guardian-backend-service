@@ -30,8 +30,8 @@ Query:
 
 Response:
 
-- `items[]` — per completed assignment: scheduled/actual/billable hours, invoice status/total, `earlyCompletion`, `lateArrival`, minute deltas
-- `summary` — counts and hour totals
+- `items[]` — per completed assignment: scheduled/actual/billable hours, payable hours, guardian pay estimate, invoice status/total, `earlyCompletion`, `lateArrival`, minute deltas
+- `summary` — counts and hour totals (includes `totalPayableHours`)
 - `meta.lowSampleSize` — `true` when fewer than 20 rows (avoid noisy comparisons)
 
 ### Example
