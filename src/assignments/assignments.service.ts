@@ -41,6 +41,10 @@ import {
   cancelCompetingOffersInTransaction,
   releaseCompetingOffers,
 } from './competing-offer-release.util';
+import {
+  lockAssignmentRow,
+  transitionOfferedAssignment,
+} from './assignment-accept.util';
 import { assertAssignmentTransitionAllowed } from './assignment-transitions';
 import { NoShowReasonCode } from './dto/no-show.dto';
 import { assertSeekingReplacementState } from './replacement-invariants';
@@ -119,6 +123,7 @@ export class AssignmentsService {
     let shouldContinueDispatch = false;
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await lockAssignmentRow(tx, assignmentId);
       const assignment = await tx.jobAssignment.findUnique({
         where: { id: assignmentId },
         include: { job: true },
@@ -134,8 +139,10 @@ export class AssignmentsService {
         throw new BadRequestException('Offer has expired');
       }
 
+      let jobLocked = false;
       if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
         await lockJobForStaffingUpdate(tx, assignment.jobId);
+        jobLocked = true;
         const staffed = await countStaffedGuardians(tx, assignment.jobId);
         if (staffed >= assignment.job.requestedGuardianCount) {
           throw new BadRequestException('All guardian slots are filled');
@@ -156,14 +163,26 @@ export class AssignmentsService {
         assignment.job.scheduledStart,
       );
 
-      const updated = await this.updateOptimistic(tx, assignmentId, assignment.versionNumber, {
-        status: AssignmentStatus.ACCEPTED,
-        acceptedAt: new Date(),
-        payPolicyModel: resolvedPayPolicy.model,
-        payMinimumHours: resolvedPayPolicy.minimumHours,
-        payPolicyResolvedAt: new Date(),
-        hourlyPayRateAtCommit: guardian.hourlyPayRate,
-        payApplyOnEarlyRelease: resolvedPayPolicy.applyOnEarlyRelease,
+      const updatedCount = await transitionOfferedAssignment(
+        tx,
+        assignmentId,
+        assignment.versionNumber,
+        {
+          status: AssignmentStatus.ACCEPTED,
+          acceptedAt: new Date(),
+          payPolicyModel: resolvedPayPolicy.model,
+          payMinimumHours: resolvedPayPolicy.minimumHours,
+          payPolicyResolvedAt: new Date(),
+          hourlyPayRateAtCommit: guardian.hourlyPayRate,
+          payApplyOnEarlyRelease: resolvedPayPolicy.applyOnEarlyRelease,
+        },
+      );
+      if (updatedCount === 0) {
+        throw new ConflictException('Offer is no longer active');
+      }
+
+      const updated = await tx.jobAssignment.findUniqueOrThrow({
+        where: { id: assignmentId },
       });
 
       await tx.guardianShiftState.update({
@@ -175,6 +194,8 @@ export class AssignmentsService {
         tx,
         assignment.jobId,
         assignment.job,
+        undefined,
+        { jobAlreadyLocked: jobLocked },
       );
       competingOffers = staffingResult.excessOffers;
       shouldContinueDispatch = staffingResult.shouldContinueDispatch;

@@ -91,6 +91,28 @@ describe('JobStaffingService', () => {
     expect(result.shouldContinueDispatch).toBe(false);
   });
 
+  it('does not regress IN_PROGRESS to PARTIALLY_ASSIGNED when refilling a slot', async () => {
+    (computeJobStaffingProgress as jest.Mock).mockResolvedValue({
+      requestedGuardianCount: 3,
+      acceptedGuardianCount: 2,
+      remainingGuardianSlots: 1,
+      pendingOfferCount: 0,
+      isFullyStaffed: false,
+    });
+
+    await service.applyUnfilledSlotRedispatch(
+      tx,
+      'job-1',
+      { status: JobStatus.IN_PROGRESS, requestedGuardianCount: 3 },
+      'ops-1',
+      'guardian_no_show',
+    );
+
+    expect(lifecycle.transitionToPartiallyAssigned).not.toHaveBeenCalled();
+    expect(lifecycle.redispatchAfterNoShowInTransaction).not.toHaveBeenCalled();
+    expect(outbox.enqueueInTransaction).toHaveBeenCalled();
+  });
+
   it('rejects over-assignment when staffed exceeds requested', async () => {
     (countStaffedGuardians as jest.Mock).mockResolvedValue(3);
 

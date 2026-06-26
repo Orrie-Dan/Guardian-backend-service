@@ -28,7 +28,10 @@ export async function cancelExcessOffersInTransaction(
       replacesAssignmentId: null,
       status: AssignmentStatus.OFFERED,
     },
-    data: { status: AssignmentStatus.CANCELLED },
+    data: {
+      status: AssignmentStatus.CANCELLED,
+      versionNumber: { increment: 1 },
+    },
   });
 
   return pending;

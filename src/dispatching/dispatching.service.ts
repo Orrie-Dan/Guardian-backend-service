@@ -17,12 +17,7 @@ import { AuditService } from '../common/services/audit.service';
 import { GuardianDispatchEligibilityService } from '../guardians/guardian-dispatch-eligibility.service';
 import { ShiftStateService } from '../guardians/shift-state.service';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
-import { JobStaffingService } from '../jobs/job-staffing.service';
-import {
-  computeJobStaffingProgress,
-  countStaffedGuardians,
-  lockJobForStaffingUpdate,
-} from '../jobs/job-staffing.util';
+import { computeJobStaffingProgress } from '../jobs/job-staffing.util';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
@@ -39,10 +34,6 @@ import { InAppNotificationAction } from '../notifications/in-app-notification.ac
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { EmailTemplateId } from '../notifications/email-template.ids';
 import { NotificationsService } from '../notifications/notifications.service';
-import {
-  cancelCompetingOffersInTransaction,
-  releaseCompetingOffers,
-} from '../assignments/competing-offer-release.util';
 
 export type DispatchFailureReason =
   | 'dispatch_timeout'
@@ -83,7 +74,6 @@ export class DispatchingService implements OnModuleInit {
     private readonly shiftState: ShiftStateService,
     private readonly outbox: OutboxService,
     private readonly lifecycle: JobLifecycleService,
-    private readonly staffing: JobStaffingService,
     private readonly billing: BillingService,
     private readonly emails: EmailNotificationService,
     private readonly notifications: NotificationsService,
@@ -1070,80 +1060,6 @@ export class DispatchingService implements OnModuleInit {
       payload: { jobId },
       scheduledAt: new Date(Date.now() + delayMs),
     });
-  }
-
-  async acceptOffer(assignmentId: string, guardianId: string) {
-    let competingOffers: Awaited<ReturnType<typeof cancelCompetingOffersInTransaction>> = [];
-    let shouldContinueDispatch = false;
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const assignment = await tx.jobAssignment.findUnique({
-        where: { id: assignmentId },
-        include: { job: true },
-      });
-
-      if (!assignment || assignment.guardianId !== guardianId) {
-        throw new NotFoundException('Assignment not found');
-      }
-      if (assignment.status !== AssignmentStatus.OFFERED) {
-        throw new BadRequestException('Offer is no longer active');
-      }
-      if (assignment.expiresAt < new Date()) {
-        throw new BadRequestException('Offer has expired');
-      }
-
-      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
-        await lockJobForStaffingUpdate(tx, assignment.jobId);
-        const staffed = await countStaffedGuardians(tx, assignment.jobId);
-        if (staffed >= assignment.job.requestedGuardianCount) {
-          throw new BadRequestException('All guardian slots are filled');
-        }
-      }
-
-      const updated = await this.updateAssignmentOptimistic(tx, assignmentId, assignment.versionNumber, {
-        status: AssignmentStatus.ACCEPTED,
-        acceptedAt: new Date(),
-      });
-
-      await tx.guardianShiftState.update({
-        where: { guardianId },
-        data: { shiftStatus: ShiftStatus.BUSY, availableForJobs: false },
-      });
-
-      const staffingResult = await this.staffing.applyAcceptStaffingUpdate(
-        tx,
-        assignment.jobId,
-        assignment.job,
-      );
-      competingOffers = staffingResult.excessOffers;
-      shouldContinueDispatch = staffingResult.shouldContinueDispatch;
-
-      await tx.job.update({
-        where: { id: assignment.jobId },
-        data: { unreachableSince: null },
-      });
-
-      return updated;
-    });
-
-    await releaseCompetingOffers(competingOffers, this.queue, this.shiftState);
-
-    if (shouldContinueDispatch) {
-      await this.outbox.enqueue({
-        aggregateType: 'job',
-        aggregateId: result.jobId,
-        eventType: 'JOB_DISPATCH_REQUESTED',
-        payload: { jobId: result.jobId, refill: true },
-      });
-    }
-
-    await this.audit.log({
-      action: 'OFFER_ACCEPTED',
-      entityType: 'job.job_assignments',
-      entityId: assignmentId,
-    });
-
-    return result;
   }
 
   async rejectOffer(assignmentId: string, guardianId: string) {

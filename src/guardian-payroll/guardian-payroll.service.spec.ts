@@ -196,6 +196,71 @@ describe('GuardianPayrollService', () => {
       );
     });
 
+    it('creates one earning per guardian for a multi-guardian job', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        id: 'inv-1',
+        jobId: 'job-1',
+        status: InvoiceStatus.PAID,
+        currency: 'RWF',
+        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+      });
+      prisma.jobAssignment.findMany.mockResolvedValue([
+        {
+          id: 'asg-1',
+          guardianId: 'g-1',
+          arrivedAt: new Date('2026-06-01T08:00:00.000Z'),
+          completedAt: new Date('2026-06-01T11:00:00.000Z'),
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: new Prisma.Decimal(5000),
+          acceptedAt: new Date('2026-06-01T07:00:00.000Z'),
+          guardian: {
+            hourlyPayRate: new Prisma.Decimal(5000),
+            payCurrency: 'RWF',
+            employmentType: 'PART_TIME',
+          },
+        },
+        {
+          id: 'asg-2',
+          guardianId: 'g-2',
+          arrivedAt: new Date('2026-06-01T08:05:00.000Z'),
+          completedAt: new Date('2026-06-01T12:00:00.000Z'),
+          payPolicyModel: PayPolicyModel.MINIMUM_GUARANTEED,
+          payMinimumHours: new Prisma.Decimal(1),
+          payApplyOnEarlyRelease: true,
+          earlyReleaseResolution: null,
+          hourlyPayRateAtCommit: new Prisma.Decimal(6000),
+          acceptedAt: new Date('2026-06-01T07:05:00.000Z'),
+          guardian: {
+            hourlyPayRate: new Prisma.Decimal(6000),
+            payCurrency: 'RWF',
+            employmentType: 'PART_TIME',
+          },
+        },
+      ]);
+      prisma.guardianEarning.findUnique.mockResolvedValue(null);
+      prisma.guardianEarning.create
+        .mockResolvedValueOnce({ id: 'earn-1' })
+        .mockResolvedValueOnce({ id: 'earn-2' });
+
+      const ids = await service.accrueForPaidInvoice('inv-1');
+
+      expect(ids).toEqual(['earn-1', 'earn-2']);
+      expect(prisma.guardianEarning.create).toHaveBeenCalledTimes(2);
+      expect(prisma.guardianEarning.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ guardianId: 'g-1', assignmentId: 'asg-1' }),
+        }),
+      );
+      expect(prisma.guardianEarning.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ guardianId: 'g-2', assignmentId: 'asg-2' }),
+        }),
+      );
+    });
+
     it('is idempotent per assignment', async () => {
       prisma.invoice.findUnique.mockResolvedValue({
         id: 'inv-1',

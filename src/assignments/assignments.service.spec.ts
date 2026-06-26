@@ -19,8 +19,13 @@ import { NoShowReasonCode } from './dto/no-show.dto';
 describe('AssignmentsService', () => {
   let service: AssignmentsService;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const staffing = {
+    applyAcceptStaffingUpdate: jest.fn(),
+    applyUnfilledSlotRedispatch: jest.fn(),
+  };
   const prisma: Record<string, any> = {
     $transaction: jest.fn(),
+    $executeRaw: jest.fn(),
     jobAssignment: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -49,10 +54,6 @@ describe('AssignmentsService', () => {
     redispatchAfterNoShowInTransaction: jest.fn(),
     transitionToSeekingReplacement: jest.fn(),
     transitionFromSeekingReplacementToInProgress: jest.fn(),
-  };
-  const staffing = {
-    applyAcceptStaffingUpdate: jest.fn(),
-    applyUnfilledSlotRedispatch: jest.fn(),
   };
   const outbox = { enqueue: jest.fn() };
   const policy = { assertOrgMember: jest.fn() };
@@ -136,13 +137,15 @@ describe('AssignmentsService', () => {
       ],
       shouldContinueDispatch: false,
     });
+    prisma.jobAssignment.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValue({ count: 1 });
     prisma.jobAssignment.findUniqueOrThrow = jest.fn().mockResolvedValue({
       id: 'a-1',
       jobId: 'job-1',
       status: AssignmentStatus.ACCEPTED,
     });
     prisma.jobAssignment.count = jest.fn().mockResolvedValue(0);
-    prisma.$executeRaw = jest.fn();
 
     await service.accept('a-1', 'g-1');
 
@@ -192,7 +195,7 @@ describe('AssignmentsService', () => {
       status: AssignmentStatus.ACCEPTED,
     });
     prisma.jobAssignment.count = jest.fn().mockResolvedValue(0);
-    prisma.$executeRaw = jest.fn();
+    prisma.jobAssignment.updateMany.mockResolvedValue({ count: 1 });
 
     await service.accept('a-1', 'g-1');
 

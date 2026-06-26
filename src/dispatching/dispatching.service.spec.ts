@@ -5,7 +5,6 @@ import { BillingService } from '../billing/billing.service';
 import { GuardianDispatchEligibilityService } from '../guardians/guardian-dispatch-eligibility.service';
 import { ShiftStateService } from '../guardians/shift-state.service';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
-import { JobStaffingService } from '../jobs/job-staffing.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OutboxService } from '../outbox/outbox.service';
@@ -60,10 +59,6 @@ describe('DispatchingService', () => {
     confirmBilling: jest.fn(),
     completeExplicit: jest.fn(),
   };
-  const staffing = {
-    applyAcceptStaffingUpdate: jest.fn(),
-    applyUnfilledSlotRedispatch: jest.fn(),
-  };
   const emails = {
     sendToGuardianUser: jest.fn(),
     sendToOrgOwners: jest.fn(),
@@ -85,7 +80,6 @@ describe('DispatchingService', () => {
         { provide: ShiftStateService, useValue: shiftState },
         { provide: OutboxService, useValue: outbox },
         { provide: JobLifecycleService, useValue: lifecycle },
-        { provide: JobStaffingService, useValue: staffing },
         { provide: BillingService, useValue: billing },
         { provide: EmailNotificationService, useValue: emails },
         { provide: NotificationsService, useValue: notifications },

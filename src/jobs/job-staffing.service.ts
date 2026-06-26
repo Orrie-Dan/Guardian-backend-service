@@ -37,6 +37,7 @@ export class JobStaffingService {
       requestedGuardianCount: number;
     },
     changedBy?: string,
+    options?: { jobAlreadyLocked?: boolean },
   ): Promise<StaffingAcceptResult> {
     if (job.status === JobStatus.SEEKING_REPLACEMENT) {
       const progress = await computeJobStaffingProgress(
@@ -47,10 +48,12 @@ export class JobStaffingService {
       return { progress, excessOffers: [], shouldContinueDispatch: false };
     }
 
-    await lockJobForStaffingUpdate(tx, jobId);
+    if (!options?.jobAlreadyLocked) {
+      await lockJobForStaffingUpdate(tx, jobId);
+    }
 
-    const staffedBefore = await countStaffedGuardians(tx, jobId);
-    if (staffedBefore > job.requestedGuardianCount) {
+    const staffedCount = await countStaffedGuardians(tx, jobId);
+    if (staffedCount > job.requestedGuardianCount) {
       throw new BadRequestException('All guardian slots are already filled');
     }
 
@@ -115,7 +118,9 @@ export class JobStaffingService {
       job.status === JobStatus.ASSIGNED ||
       job.status === JobStatus.PARTIALLY_ASSIGNED
     ) {
-      await this.lifecycle.transitionToPartiallyAssigned(tx, jobId, changedBy, reason);
+      if (job.status !== JobStatus.PARTIALLY_ASSIGNED) {
+        await this.lifecycle.transitionToPartiallyAssigned(tx, jobId, changedBy, reason);
+      }
     } else {
       await this.lifecycle.redispatchAfterNoShowInTransaction(
         tx,
