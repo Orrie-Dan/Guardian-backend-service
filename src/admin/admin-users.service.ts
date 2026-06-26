@@ -55,6 +55,7 @@ export interface BulkDeleteUsersResult {
 const ACTIVE_JOB_STATUSES: JobStatus[] = [
   JobStatus.PENDING,
   JobStatus.DISPATCHING,
+  JobStatus.PARTIALLY_ASSIGNED,
   JobStatus.ASSIGNED,
   JobStatus.IN_PROGRESS,
   JobStatus.SEEKING_REPLACEMENT,

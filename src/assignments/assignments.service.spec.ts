@@ -8,6 +8,7 @@ import { DispatchingService } from '../dispatching/dispatching.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
+import { JobStaffingService } from '../jobs/job-staffing.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { QueueService } from '../queue/queue.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,7 +35,7 @@ describe('AssignmentsService', () => {
     },
     user: { findMany: jest.fn() },
     organizationUser: { findMany: jest.fn() },
-    job: { update: jest.fn() },
+    job: { update: jest.fn(), findUnique: jest.fn() },
   };
   const audit = { log: jest.fn() };
   const billing = { createDraftInvoiceForJobId: jest.fn() };
@@ -48,6 +49,10 @@ describe('AssignmentsService', () => {
     redispatchAfterNoShowInTransaction: jest.fn(),
     transitionToSeekingReplacement: jest.fn(),
     transitionFromSeekingReplacementToInProgress: jest.fn(),
+  };
+  const staffing = {
+    applyAcceptStaffingUpdate: jest.fn(),
+    applyUnfilledSlotRedispatch: jest.fn(),
   };
   const outbox = { enqueue: jest.fn() };
   const policy = { assertOrgMember: jest.fn() };
@@ -78,6 +83,7 @@ describe('AssignmentsService', () => {
         { provide: BillingService, useValue: billing },
         { provide: ShiftStateService, useValue: shiftState },
         { provide: JobLifecycleService, useValue: lifecycle },
+        { provide: JobStaffingService, useValue: staffing },
         { provide: OutboxService, useValue: outbox },
         { provide: QueueService, useValue: queue },
         { provide: ResourceOwnerPolicy, useValue: policy },
@@ -96,7 +102,7 @@ describe('AssignmentsService', () => {
     jest.clearAllMocks();
   });
 
-  it('accept releases competing urgent offers back to available', async () => {
+  it('accept cancels excess offers only when all slots are filled', async () => {
     prisma.jobAssignment.findUnique.mockResolvedValue({
       id: 'a-1',
       jobId: 'job-1',
@@ -109,21 +115,34 @@ describe('AssignmentsService', () => {
         status: JobStatus.DISPATCHING,
         jobType: 'PATROL',
         scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
+        requestedGuardianCount: 1,
       },
     });
     prisma.guardian.findUnique.mockResolvedValue({
       employmentType: 'PART_TIME',
       hourlyPayRate: 5000,
     });
-    prisma.jobAssignment.findMany.mockResolvedValue([
-      { id: 'a-2', guardianId: 'g-2' },
-      { id: 'a-3', guardianId: 'g-3' },
-    ]);
-    prisma.jobAssignment.updateMany.mockResolvedValue({ count: 2 });
+    staffing.applyAcceptStaffingUpdate.mockResolvedValue({
+      progress: {
+        requestedGuardianCount: 1,
+        acceptedGuardianCount: 1,
+        remainingGuardianSlots: 0,
+        pendingOfferCount: 0,
+        isFullyStaffed: true,
+      },
+      excessOffers: [
+        { id: 'a-2', guardianId: 'g-2' },
+        { id: 'a-3', guardianId: 'g-3' },
+      ],
+      shouldContinueDispatch: false,
+    });
     prisma.jobAssignment.findUniqueOrThrow = jest.fn().mockResolvedValue({
       id: 'a-1',
+      jobId: 'job-1',
       status: AssignmentStatus.ACCEPTED,
     });
+    prisma.jobAssignment.count = jest.fn().mockResolvedValue(0);
+    prisma.$executeRaw = jest.fn();
 
     await service.accept('a-1', 'g-1');
 
@@ -132,7 +151,58 @@ describe('AssignmentsService', () => {
     expect(shiftState.setAvailable).toHaveBeenCalledWith('g-2');
     expect(shiftState.setAvailable).toHaveBeenCalledWith('g-3');
     expect(shiftState.setAvailable).not.toHaveBeenCalledWith('g-1');
+    expect(outbox.enqueue).not.toHaveBeenCalled();
     expect(payPolicy.resolvePayPolicy).toHaveBeenCalled();
+  });
+
+  it('accept continues dispatch when staffing is partial', async () => {
+    prisma.jobAssignment.findUnique.mockResolvedValue({
+      id: 'a-1',
+      jobId: 'job-1',
+      guardianId: 'g-1',
+      status: AssignmentStatus.OFFERED,
+      versionNumber: 1,
+      expiresAt: new Date(Date.now() + 60_000),
+      job: {
+        id: 'job-1',
+        status: JobStatus.DISPATCHING,
+        jobType: 'PATROL',
+        scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
+        requestedGuardianCount: 3,
+      },
+    });
+    prisma.guardian.findUnique.mockResolvedValue({
+      employmentType: 'PART_TIME',
+      hourlyPayRate: 5000,
+    });
+    staffing.applyAcceptStaffingUpdate.mockResolvedValue({
+      progress: {
+        requestedGuardianCount: 3,
+        acceptedGuardianCount: 1,
+        remainingGuardianSlots: 2,
+        pendingOfferCount: 1,
+        isFullyStaffed: false,
+      },
+      excessOffers: [],
+      shouldContinueDispatch: true,
+    });
+    prisma.jobAssignment.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      id: 'a-1',
+      jobId: 'job-1',
+      status: AssignmentStatus.ACCEPTED,
+    });
+    prisma.jobAssignment.count = jest.fn().mockResolvedValue(0);
+    prisma.$executeRaw = jest.fn();
+
+    await service.accept('a-1', 'g-1');
+
+    expect(queue.cancelOfferExpiry).not.toHaveBeenCalled();
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'JOB_DISPATCH_REQUESTED',
+        payload: { jobId: 'job-1', refill: true },
+      }),
+    );
   });
 
   it('completes assignment and then completes job lifecycle', async () => {
@@ -150,6 +220,10 @@ describe('AssignmentsService', () => {
       id: 'a-1',
       jobId: 'job-1',
       status: AssignmentStatus.COMPLETED,
+    });
+    prisma.job.findUnique.mockResolvedValue({
+      id: 'job-1',
+      status: JobStatus.AWAITING_CONFIRMATION,
     });
 
     await service.complete('a-1', 'g-1', 'user-1');
@@ -169,6 +243,11 @@ describe('AssignmentsService', () => {
       guardianId: 'g-1',
       status: AssignmentStatus.ACCEPTED,
       versionNumber: 1,
+      job: {
+        id: 'job-1',
+        status: JobStatus.ASSIGNED,
+        requestedGuardianCount: 1,
+      },
     });
     prisma.jobAssignment.updateMany.mockResolvedValue({ count: 1 });
     prisma.jobAssignment.findUniqueOrThrow.mockResolvedValue({
@@ -184,9 +263,10 @@ describe('AssignmentsService', () => {
       actorRole: 'OPS_ADMIN' as never,
     });
 
-    expect(lifecycle.redispatchAfterNoShowInTransaction).toHaveBeenCalledWith(
+    expect(staffing.applyUnfilledSlotRedispatch).toHaveBeenCalledWith(
       prisma,
       'job-1',
+      expect.objectContaining({ requestedGuardianCount: 1 }),
       'user-1',
       NoShowReasonCode.CLIENT_NOT_PRESENT,
     );

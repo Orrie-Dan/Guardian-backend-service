@@ -55,6 +55,7 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
           status: {
             in: [
               JobStatus.ASSIGNED,
+              JobStatus.PARTIALLY_ASSIGNED,
               JobStatus.IN_PROGRESS,
               JobStatus.SEEKING_REPLACEMENT,
               JobStatus.COMPLETED,
@@ -76,7 +77,11 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
         const hasActiveAssignment = statuses.some((status) =>
           ACTIVE_ASSIGNMENT_STATUSES.has(status),
         );
-        if (job.status === JobStatus.ASSIGNED || job.status === JobStatus.IN_PROGRESS) {
+        if (
+          job.status === JobStatus.ASSIGNED ||
+          job.status === JobStatus.PARTIALLY_ASSIGNED ||
+          job.status === JobStatus.IN_PROGRESS
+        ) {
           return !hasActiveAssignment;
         }
         if (
@@ -118,7 +123,7 @@ export class JobStatusReconciliationService implements OnModuleInit, OnModuleDes
   private async failOverdueDispatchJobs(): Promise<void> {
     const overdue = await this.prisma.job.findMany({
       where: {
-        status: { in: [JobStatus.PENDING, JobStatus.DISPATCHING] },
+        status: { in: [JobStatus.PENDING, JobStatus.DISPATCHING, JobStatus.PARTIALLY_ASSIGNED] },
         dispatchDeadlineAt: { lte: new Date() },
       },
       select: { id: true },

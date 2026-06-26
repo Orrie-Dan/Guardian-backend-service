@@ -17,6 +17,12 @@ import { AuditService } from '../common/services/audit.service';
 import { GuardianDispatchEligibilityService } from '../guardians/guardian-dispatch-eligibility.service';
 import { ShiftStateService } from '../guardians/shift-state.service';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
+import { JobStaffingService } from '../jobs/job-staffing.service';
+import {
+  computeJobStaffingProgress,
+  countStaffedGuardians,
+  lockJobForStaffingUpdate,
+} from '../jobs/job-staffing.util';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
@@ -77,6 +83,7 @@ export class DispatchingService implements OnModuleInit {
     private readonly shiftState: ShiftStateService,
     private readonly outbox: OutboxService,
     private readonly lifecycle: JobLifecycleService,
+    private readonly staffing: JobStaffingService,
     private readonly billing: BillingService,
     private readonly emails: EmailNotificationService,
     private readonly notifications: NotificationsService,
@@ -93,7 +100,11 @@ export class DispatchingService implements OnModuleInit {
     if (!job) {
       throw new NotFoundException('Job not found');
     }
-    if (job.status !== JobStatus.PENDING && job.status !== JobStatus.DISPATCHING) {
+    if (
+      job.status !== JobStatus.PENDING &&
+      job.status !== JobStatus.DISPATCHING &&
+      job.status !== JobStatus.PARTIALLY_ASSIGNED
+    ) {
       throw new BadRequestException(`Job cannot be dispatched in status ${job.status}`);
     }
 
@@ -228,6 +239,34 @@ export class DispatchingService implements OnModuleInit {
 
     const isReplacementDispatch = job.status === JobStatus.SEEKING_REPLACEMENT;
 
+    if (!isReplacementDispatch) {
+      const progress = await computeJobStaffingProgress(
+        this.prisma,
+        jobId,
+        job.requestedGuardianCount,
+      );
+      if (progress.isFullyStaffed) {
+        if (
+          job.status !== JobStatus.ASSIGNED &&
+          job.status !== JobStatus.IN_PROGRESS
+        ) {
+          await this.prisma.$transaction((tx) =>
+            this.lifecycle.transitionToAssigned(tx, jobId),
+          );
+        }
+        return;
+      }
+      if (
+        job.status !== JobStatus.PENDING &&
+        job.status !== JobStatus.DISPATCHING &&
+        job.status !== JobStatus.PARTIALLY_ASSIGNED &&
+        job.status !== JobStatus.ASSIGNED &&
+        job.status !== JobStatus.IN_PROGRESS
+      ) {
+        return;
+      }
+    }
+
     await this.ensureDispatchSchedule(jobId, job.dispatchDeadlineAt, job.dispatchStartedAt);
     if (!job.dispatchDeadlineAt) {
       job.dispatchDeadlineAt = new Date(Date.now() + DISPATCH_WINDOW_MS);
@@ -337,14 +376,43 @@ export class DispatchingService implements OnModuleInit {
       id: string;
       offersSentCount: number;
       referenceNumber?: string;
+      requestedGuardianCount: number;
     },
     district: string,
   ): Promise<void> {
     const dispatchResult = await this.prisma.$transaction(async (tx) => {
+      const progress = await computeJobStaffingProgress(
+        tx,
+        jobId,
+        job.requestedGuardianCount,
+      );
+      if (progress.isFullyStaffed) {
+        return {
+          assignments: [] as { id: string; guardianId: string; expiresAt: Date }[],
+          anomaly: undefined,
+          pick: null,
+          fullyStaffed: true,
+        };
+      }
+
+      const openSlots = Math.max(
+        0,
+        progress.remainingGuardianSlots - progress.pendingOfferCount,
+      );
+      if (openSlots === 0) {
+        return {
+          assignments: [] as { id: string; guardianId: string; expiresAt: Date }[],
+          anomaly: undefined,
+          pick: null,
+          fullyStaffed: false,
+        };
+      }
+
+      const parallelCount = Math.min(URGENT_PARALLEL_OFFERS, openSlots);
       const pick = await this.eligibility.pickParallelReachableGuardians(
         district,
         jobId,
-        URGENT_PARALLEL_OFFERS,
+        parallelCount,
         tx,
       );
 
@@ -363,6 +431,7 @@ export class DispatchingService implements OnModuleInit {
             triedIds: [...(await this.eligibility.getTriedGuardianIds(jobId, tx))],
           } satisfies DispatchAnomaly,
           pick,
+          fullyStaffed: false,
         };
       }
 
@@ -371,8 +440,16 @@ export class DispatchingService implements OnModuleInit {
         const created = await this.createOfferInTransaction(tx, jobId, guardian.id);
         assignments.push(created);
       }
-      return { assignments, anomaly: undefined, pick };
+      return { assignments, anomaly: undefined, pick, fullyStaffed: false };
     });
+
+    if (dispatchResult.fullyStaffed) {
+      return;
+    }
+
+    if (!dispatchResult.pick) {
+      return;
+    }
 
     if (dispatchResult.anomaly) {
       await this.logDispatchAnomaly(jobId, job, dispatchResult.anomaly);
@@ -410,14 +487,6 @@ export class DispatchingService implements OnModuleInit {
         status: AssignmentStatus.OFFERED,
         expiresAt,
         replacesAssignmentId: replacesAssignmentId ?? undefined,
-      },
-    });
-
-    await tx.guardianShiftState.update({
-      where: { guardianId },
-      data: {
-        shiftStatus: ShiftStatus.BUSY,
-        availableForJobs: false,
       },
     });
 
@@ -528,6 +597,34 @@ export class DispatchingService implements OnModuleInit {
         triedIds: anomaly.triedIds ?? null,
       },
     });
+  }
+
+  async releaseActiveStaffedAssignmentsForJob(jobId: string): Promise<void> {
+    const active = await this.prisma.jobAssignment.findMany({
+      where: {
+        jobId,
+        replacesAssignmentId: null,
+        status: {
+          in: [
+            AssignmentStatus.ACCEPTED,
+            AssignmentStatus.EN_ROUTE,
+            AssignmentStatus.ON_SITE,
+            AssignmentStatus.EARLY_RELEASE_REQUESTED,
+            AssignmentStatus.REPLACEMENT_REQUESTED,
+          ],
+        },
+      },
+    });
+    if (!active.length) {
+      return;
+    }
+    await this.prisma.jobAssignment.updateMany({
+      where: { id: { in: active.map((a) => a.id) } },
+      data: { status: AssignmentStatus.CANCELLED },
+    });
+    for (const assignment of active) {
+      await this.shiftState.setAvailable(assignment.guardianId);
+    }
   }
 
   async releaseInFlightOffersForJob(jobId: string): Promise<void> {
@@ -734,7 +831,8 @@ export class DispatchingService implements OnModuleInit {
   }): Promise<boolean> {
     if (
       job.status !== JobStatus.PENDING &&
-      job.status !== JobStatus.DISPATCHING
+      job.status !== JobStatus.DISPATCHING &&
+      job.status !== JobStatus.PARTIALLY_ASSIGNED
     ) {
       return false;
     }
@@ -751,7 +849,8 @@ export class DispatchingService implements OnModuleInit {
   ): Promise<boolean> {
     if (
       job.status !== JobStatus.PENDING &&
-      job.status !== JobStatus.DISPATCHING
+      job.status !== JobStatus.DISPATCHING &&
+      job.status !== JobStatus.PARTIALLY_ASSIGNED
     ) {
       return false;
     }
@@ -788,7 +887,8 @@ export class DispatchingService implements OnModuleInit {
   }): Promise<boolean> {
     if (
       job.status !== JobStatus.PENDING &&
-      job.status !== JobStatus.DISPATCHING
+      job.status !== JobStatus.DISPATCHING &&
+      job.status !== JobStatus.PARTIALLY_ASSIGNED
     ) {
       return false;
     }
@@ -974,6 +1074,7 @@ export class DispatchingService implements OnModuleInit {
 
   async acceptOffer(assignmentId: string, guardianId: string) {
     let competingOffers: Awaited<ReturnType<typeof cancelCompetingOffersInTransaction>> = [];
+    let shouldContinueDispatch = false;
 
     const result = await this.prisma.$transaction(async (tx) => {
       const assignment = await tx.jobAssignment.findUnique({
@@ -991,6 +1092,14 @@ export class DispatchingService implements OnModuleInit {
         throw new BadRequestException('Offer has expired');
       }
 
+      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
+        await lockJobForStaffingUpdate(tx, assignment.jobId);
+        const staffed = await countStaffedGuardians(tx, assignment.jobId);
+        if (staffed >= assignment.job.requestedGuardianCount) {
+          throw new BadRequestException('All guardian slots are filled');
+        }
+      }
+
       const updated = await this.updateAssignmentOptimistic(tx, assignmentId, assignment.versionNumber, {
         status: AssignmentStatus.ACCEPTED,
         acceptedAt: new Date(),
@@ -1001,15 +1110,13 @@ export class DispatchingService implements OnModuleInit {
         data: { shiftStatus: ShiftStatus.BUSY, availableForJobs: false },
       });
 
-      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
-        await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
-      }
-
-      competingOffers = await cancelCompetingOffersInTransaction(
+      const staffingResult = await this.staffing.applyAcceptStaffingUpdate(
         tx,
         assignment.jobId,
-        assignmentId,
+        assignment.job,
       );
+      competingOffers = staffingResult.excessOffers;
+      shouldContinueDispatch = staffingResult.shouldContinueDispatch;
 
       await tx.job.update({
         where: { id: assignment.jobId },
@@ -1020,6 +1127,15 @@ export class DispatchingService implements OnModuleInit {
     });
 
     await releaseCompetingOffers(competingOffers, this.queue, this.shiftState);
+
+    if (shouldContinueDispatch) {
+      await this.outbox.enqueue({
+        aggregateType: 'job',
+        aggregateId: result.jobId,
+        eventType: 'JOB_DISPATCH_REQUESTED',
+        payload: { jobId: result.jobId, refill: true },
+      });
+    }
 
     await this.audit.log({
       action: 'OFFER_ACCEPTED',
@@ -1123,6 +1239,7 @@ export class DispatchingService implements OnModuleInit {
       job &&
       (job.status === JobStatus.PENDING ||
         job.status === JobStatus.DISPATCHING ||
+        job.status === JobStatus.PARTIALLY_ASSIGNED ||
         job.status === JobStatus.SEEKING_REPLACEMENT)
     ) {
       if (

@@ -7,6 +7,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { JobLifecycleService } from './job-lifecycle.service';
 import { JobReferenceService } from './job-reference.service';
+import { JobStaffingPresenterService } from './job-staffing-presenter.service';
+import { JobStaffingService } from './job-staffing.service';
 import { JobStatusReconciliationService } from './job-status-reconciliation.service';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
@@ -25,8 +27,10 @@ import { JobsService } from './jobs.service';
     JobsService,
     JobReferenceService,
     JobLifecycleService,
+    JobStaffingService,
+    JobStaffingPresenterService,
     JobStatusReconciliationService,
   ],
-  exports: [JobsService, JobLifecycleService],
+  exports: [JobsService, JobLifecycleService, JobStaffingService, JobStaffingPresenterService],
 })
 export class JobsModule {}

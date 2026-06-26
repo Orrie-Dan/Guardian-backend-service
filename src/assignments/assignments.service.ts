@@ -28,6 +28,11 @@ import { InAppNotificationAction } from '../notifications/in-app-notification.ac
 import { NotificationsService } from '../notifications/notifications.service';
 import { isEarlyReleaseApproved } from './early-release.util';
 import { JobLifecycleService } from '../jobs/job-lifecycle.service';
+import { JobStaffingService } from '../jobs/job-staffing.service';
+import {
+  countStaffedGuardians,
+  lockJobForStaffingUpdate,
+} from '../jobs/job-staffing.util';
 import { OutboxService } from '../outbox/outbox.service';
 import { DISPATCH_WINDOW_MS } from '../queue/queue.constants';
 import { QueueService } from '../queue/queue.service';
@@ -63,6 +68,7 @@ export class AssignmentsService {
     private readonly billing: BillingService,
     private readonly shiftState: ShiftStateService,
     private readonly lifecycle: JobLifecycleService,
+    private readonly staffing: JobStaffingService,
     private readonly outbox: OutboxService,
     private readonly queue: QueueService,
     private readonly policy: ResourceOwnerPolicy,
@@ -110,6 +116,7 @@ export class AssignmentsService {
 
   async accept(assignmentId: string, guardianId: string) {
     let competingOffers: Awaited<ReturnType<typeof cancelCompetingOffersInTransaction>> = [];
+    let shouldContinueDispatch = false;
 
     const result = await this.prisma.$transaction(async (tx) => {
       const assignment = await tx.jobAssignment.findUnique({
@@ -125,6 +132,14 @@ export class AssignmentsService {
       }
       if (assignment.expiresAt < new Date()) {
         throw new BadRequestException('Offer has expired');
+      }
+
+      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
+        await lockJobForStaffingUpdate(tx, assignment.jobId);
+        const staffed = await countStaffedGuardians(tx, assignment.jobId);
+        if (staffed >= assignment.job.requestedGuardianCount) {
+          throw new BadRequestException('All guardian slots are filled');
+        }
       }
 
       const guardian = await tx.guardian.findUnique({
@@ -156,20 +171,27 @@ export class AssignmentsService {
         data: { shiftStatus: ShiftStatus.BUSY, availableForJobs: false },
       });
 
-      if (assignment.job.status !== JobStatus.SEEKING_REPLACEMENT) {
-        await this.lifecycle.transitionToAssigned(tx, assignment.jobId);
-      }
-
-      competingOffers = await cancelCompetingOffersInTransaction(
+      const staffingResult = await this.staffing.applyAcceptStaffingUpdate(
         tx,
         assignment.jobId,
-        assignmentId,
+        assignment.job,
       );
+      competingOffers = staffingResult.excessOffers;
+      shouldContinueDispatch = staffingResult.shouldContinueDispatch;
 
       return updated;
     });
 
     await releaseCompetingOffers(competingOffers, this.queue, this.shiftState);
+
+    if (shouldContinueDispatch) {
+      await this.outbox.enqueue({
+        aggregateType: 'job',
+        aggregateId: result.jobId,
+        eventType: 'JOB_DISPATCH_REQUESTED',
+        payload: { jobId: result.jobId, refill: true },
+      });
+    }
 
     await this.audit.log({
       action: 'OFFER_ACCEPTED',
@@ -842,7 +864,13 @@ export class AssignmentsService {
       data: { completedAt: new Date() },
     });
     await this.lifecycle.completeFromAssignment(result.jobId, actorUserId);
-    await this.billing.createDraftInvoiceForJobId(result.jobId, actorUserId);
+    const jobAfter = await this.prisma.job.findUnique({
+      where: { id: result.jobId },
+      select: { status: true },
+    });
+    if (jobAfter?.status === JobStatus.AWAITING_CONFIRMATION) {
+      await this.billing.createDraftInvoiceForJobId(result.jobId, actorUserId);
+    }
     await this.shiftState.setAvailable(guardianId);
     return result;
   }
@@ -896,6 +924,7 @@ export class AssignmentsService {
   ) {
     const assignment = await this.prisma.jobAssignment.findUnique({
       where: { id: assignmentId },
+      include: { job: true },
     });
     if (!assignment) {
       throw new NotFoundException('Assignment not found');
@@ -943,9 +972,10 @@ export class AssignmentsService {
         },
       });
       await this.shiftState.setAvailable(assignment.guardianId);
-      await this.lifecycle.redispatchAfterNoShowInTransaction(
+      await this.staffing.applyUnfilledSlotRedispatch(
         tx,
         assignment.jobId,
+        assignment.job,
         input.actorUserId,
         input.reasonCode,
       );

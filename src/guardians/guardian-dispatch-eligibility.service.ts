@@ -4,6 +4,9 @@ import { normalizeDistrict } from '../common/district.util';
 import { PresenceService } from '../redis/presence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DISPATCH_POOL_SIZE } from '../queue/queue.constants';
+import {
+  STAFFED_ASSIGNMENT_STATUSES,
+} from '../jobs/job-staffing.util';
 
 type GuardianRow = { id: string };
 
@@ -113,7 +116,28 @@ export class GuardianDispatchEligibilityService {
     jobId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
-    return [...(await this.getTriedGuardianIds(jobId, tx))];
+    const db = tx ?? this.prisma;
+    const [tried, activeOnJob] = await Promise.all([
+      this.getTriedGuardianIds(jobId, tx),
+      db.jobAssignment.findMany({
+        where: {
+          jobId,
+          replacesAssignmentId: null,
+          status: {
+            in: [
+              AssignmentStatus.OFFERED,
+              ...STAFFED_ASSIGNMENT_STATUSES,
+            ],
+          },
+        },
+        select: { guardianId: true },
+      }),
+    ]);
+    const excluded = new Set(tried);
+    for (const row of activeOnJob) {
+      excluded.add(row.guardianId);
+    }
+    return [...excluded];
   }
 
   async getReplacementExcludedGuardianIds(

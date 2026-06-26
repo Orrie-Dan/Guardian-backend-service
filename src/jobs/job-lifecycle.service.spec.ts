@@ -12,6 +12,7 @@ describe('JobLifecycleService', () => {
     job: { findUnique: jest.fn(), update: jest.fn() },
     jobStatusHistory: { create: jest.fn() },
     outboxEvent: { create: jest.fn() },
+    jobAssignment: { count: jest.fn() },
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const prisma: Record<string, any> = {
@@ -41,6 +42,7 @@ describe('JobLifecycleService', () => {
 
   it('moves job to awaiting confirmation from assignment when in progress', async () => {
     tx.job.findUnique.mockResolvedValue({ id: 'job-1', status: JobStatus.IN_PROGRESS });
+    tx.jobAssignment.count.mockResolvedValue(0);
 
     await service.completeFromAssignment('job-1');
 
@@ -124,11 +126,9 @@ describe('JobLifecycleService', () => {
     });
   });
 
-  it('does not require transition when already awaiting confirmation', async () => {
-    tx.job.findUnique.mockResolvedValue({
-      id: 'job-1',
-      status: JobStatus.AWAITING_CONFIRMATION,
-    });
+  it('waits for all guardians before awaiting confirmation', async () => {
+    tx.job.findUnique.mockResolvedValue({ id: 'job-1', status: JobStatus.IN_PROGRESS });
+    tx.jobAssignment.count.mockResolvedValue(2);
 
     await service.completeFromAssignment('job-1');
 

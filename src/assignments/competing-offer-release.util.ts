@@ -4,35 +4,43 @@ import { QueueService } from '../queue/queue.service';
 
 export type CompetingOffer = { id: string; guardianId: string };
 
-/** Marks sibling OFFERED assignments CANCELLED; returns losers for post-tx cleanup. */
-export async function cancelCompetingOffersInTransaction(
+/** Cancels all pending offers when every guardian slot is filled. */
+export async function cancelExcessOffersInTransaction(
   tx: Prisma.TransactionClient,
   jobId: string,
-  winningAssignmentId: string,
 ): Promise<CompetingOffer[]> {
-  const competing = await tx.jobAssignment.findMany({
+  const pending = await tx.jobAssignment.findMany({
     where: {
       jobId,
-      id: { not: winningAssignmentId },
+      replacesAssignmentId: null,
       status: AssignmentStatus.OFFERED,
     },
     select: { id: true, guardianId: true },
   });
 
-  if (!competing.length) {
+  if (!pending.length) {
     return [];
   }
 
   await tx.jobAssignment.updateMany({
     where: {
       jobId,
-      id: { not: winningAssignmentId },
+      replacesAssignmentId: null,
       status: AssignmentStatus.OFFERED,
     },
     data: { status: AssignmentStatus.CANCELLED },
   });
 
-  return competing;
+  return pending;
+}
+
+/** @deprecated Use cancelExcessOffersInTransaction when all slots are filled. */
+export async function cancelCompetingOffersInTransaction(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+  _winningAssignmentId: string,
+): Promise<CompetingOffer[]> {
+  return cancelExcessOffersInTransaction(tx, jobId);
 }
 
 export async function releaseCompetingOffers(

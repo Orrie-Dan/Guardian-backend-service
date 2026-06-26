@@ -8,6 +8,7 @@ import { AssignmentStatus, JobStatus, Prisma } from '@prisma/client';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DISPATCH_WINDOW_MS } from '../queue/queue.constants';
+import { countActiveStaffedGuardians } from './job-staffing.util';
 
 @Injectable()
 export class JobLifecycleService {
@@ -18,6 +19,22 @@ export class JobLifecycleService {
     private readonly outbox: OutboxService,
   ) {}
 
+  transitionToPartiallyAssigned(
+    tx: Prisma.TransactionClient,
+    jobId: string,
+    changedBy?: string,
+    reason?: string,
+  ) {
+    return this.transitionJobStatus(
+      tx,
+      jobId,
+      JobStatus.PARTIALLY_ASSIGNED,
+      [JobStatus.PENDING, JobStatus.DISPATCHING, JobStatus.PARTIALLY_ASSIGNED],
+      changedBy,
+      reason ?? 'guardian_accepted_partial',
+    );
+  }
+
   transitionToAssigned(
     tx: Prisma.TransactionClient,
     jobId: string,
@@ -27,7 +44,12 @@ export class JobLifecycleService {
       tx,
       jobId,
       JobStatus.ASSIGNED,
-      [JobStatus.PENDING, JobStatus.DISPATCHING],
+      [
+        JobStatus.PENDING,
+        JobStatus.DISPATCHING,
+        JobStatus.PARTIALLY_ASSIGNED,
+        JobStatus.ASSIGNED,
+      ],
       changedBy,
     );
   }
@@ -41,7 +63,7 @@ export class JobLifecycleService {
       tx,
       jobId,
       JobStatus.IN_PROGRESS,
-      [JobStatus.ASSIGNED],
+      [JobStatus.ASSIGNED, JobStatus.PARTIALLY_ASSIGNED],
       changedBy,
     );
   }
@@ -77,16 +99,20 @@ export class JobLifecycleService {
   }
 
   async completeFromAssignment(jobId: string, changedBy?: string) {
-    await this.prisma.$transaction((tx) =>
-      this.transitionJobStatus(
+    await this.prisma.$transaction(async (tx) => {
+      const activeStaffed = await countActiveStaffedGuardians(tx, jobId);
+      if (activeStaffed > 0) {
+        return;
+      }
+      await this.transitionJobStatus(
         tx,
         jobId,
         JobStatus.AWAITING_CONFIRMATION,
-        [JobStatus.IN_PROGRESS, JobStatus.ASSIGNED],
+        [JobStatus.IN_PROGRESS, JobStatus.ASSIGNED, JobStatus.PARTIALLY_ASSIGNED],
         changedBy,
-        'guardian_assignment_completed',
-      ),
-    );
+        'all_guardians_assignment_completed',
+      );
+    });
   }
 
   async confirmBilling(jobId: string, changedBy?: string) {
@@ -136,7 +162,7 @@ export class JobLifecycleService {
         tx,
         jobId,
         JobStatus.COMPLETED,
-        [JobStatus.IN_PROGRESS, JobStatus.ASSIGNED],
+        [JobStatus.IN_PROGRESS, JobStatus.ASSIGNED, JobStatus.PARTIALLY_ASSIGNED],
         changedBy,
       ),
     );
@@ -158,7 +184,12 @@ export class JobLifecycleService {
       tx,
       jobId,
       JobStatus.DISPATCHING,
-      [JobStatus.ASSIGNED, JobStatus.IN_PROGRESS, JobStatus.DISPATCHING],
+      [
+        JobStatus.ASSIGNED,
+        JobStatus.PARTIALLY_ASSIGNED,
+        JobStatus.IN_PROGRESS,
+        JobStatus.DISPATCHING,
+      ],
       changedBy,
       reason ?? 'assignment_no_show',
     );

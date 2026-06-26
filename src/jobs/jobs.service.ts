@@ -36,9 +36,12 @@ import { EmailNotificationService } from '../notifications/email-notification.se
 import { EmailTemplateId } from '../notifications/email-template.ids';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  JobTrackingAssignment,
   JobTrackingResponse,
   TRACKABLE_ASSIGNMENT_STATUSES,
 } from './job-tracking.types';
+import { JobStaffingPresenterService } from './job-staffing-presenter.service';
+import { STAFFED_ASSIGNMENT_STATUSES } from './job-staffing.util';
 
 const jobWithLocationAndOrganization = {
   location: true,
@@ -61,6 +64,7 @@ export class JobsService {
     private readonly guardianLocation: GuardianLocationService,
     private readonly billingCalculation: BillingCalculationService,
     private readonly invoiceView: InvoiceViewService,
+    private readonly staffingPresenter: JobStaffingPresenterService,
   ) {}
 
   async create(dto: CreateJobDto, actor: AuthUserPayload, autoDispatch = true) {
@@ -203,7 +207,7 @@ export class JobsService {
 
   async findOne(id: string, actor: AuthUserPayload) {
     const job = await this.policy.assertJobAccess(id, actor);
-    return this.prisma.job.findUnique({
+    const record = await this.prisma.job.findUnique({
       where: { id: job.id },
       include: {
         ...jobWithLocationAndOrganization,
@@ -214,6 +218,37 @@ export class JobsService {
         statusHistory: { orderBy: { changedAt: 'desc' }, take: 20 },
       },
     });
+    if (!record) {
+      throw new NotFoundException('Job not found');
+    }
+    const staffing = await this.staffingPresenter.buildStaffingProgress(
+      this.prisma,
+      record.id,
+      record.requestedGuardianCount,
+    );
+    const assignedGuardians = record.assignments
+      .filter((a) => a.replacesAssignmentId === null)
+      .filter((a) => STAFFED_ASSIGNMENT_STATUSES.includes(a.status))
+      .map((a) => ({
+        assignmentId: a.id,
+        guardianId: a.guardianId,
+        status: a.status,
+        displayName:
+          a.guardian.user.fullName?.trim() || a.guardian.user.phoneNumber || null,
+        acceptedAt: a.acceptedAt?.toISOString() ?? null,
+      }));
+
+    return {
+      ...record,
+      staffing,
+      assignedGuardians,
+      assignmentProgress: {
+        filled: staffing.acceptedGuardianCount,
+        requested: staffing.requestedGuardianCount,
+        remaining: staffing.remainingGuardianSlots,
+        isFullyStaffed: staffing.isFullyStaffed,
+      },
+    };
   }
 
   async timeline(id: string, actor: AuthUserPayload) {
@@ -232,9 +267,11 @@ export class JobsService {
       include: {
         location: true,
         assignments: {
-          where: { status: { in: TRACKABLE_ASSIGNMENT_STATUSES } },
-          orderBy: { acceptedAt: 'desc' },
-          take: 1,
+          where: {
+            replacesAssignmentId: null,
+            status: { in: TRACKABLE_ASSIGNMENT_STATUSES },
+          },
+          orderBy: { acceptedAt: 'asc' },
           include: {
             guardian: {
               include: {
@@ -255,53 +292,74 @@ export class JobsService {
       throw new NotFoundException('Job not found');
     }
 
-    const assignment = job.assignments[0];
-    if (!assignment) {
+    const staffing = await this.staffingPresenter.buildStaffingProgress(
+      this.prisma,
+      job.id,
+      job.requestedGuardianCount,
+    );
+
+    if (!job.assignments.length) {
       throw new BadRequestException(
         'Live tracking is only available after a guardian accepts the job',
       );
     }
 
-    const location = await this.guardianLocation.getCurrent(assignment.guardianId);
-
     const destLat = job.location.latitude.toString();
     const destLng = job.location.longitude.toString();
-    const guardianLat = parseCoordinate(location.latitude);
-    const guardianLng = parseCoordinate(location.longitude);
     const siteLat = parseCoordinate(destLat);
     const siteLng = parseCoordinate(destLng);
 
-    let distanceMeters: number | null = null;
-    let etaMinutes: number | null = null;
-    if (
-      guardianLat != null &&
-      guardianLng != null &&
-      siteLat != null &&
-      siteLng != null
-    ) {
-      distanceMeters = Math.round(
-        haversineDistanceMeters(guardianLat, guardianLng, siteLat, siteLng),
-      );
-      etaMinutes = estimateEtaMinutes(distanceMeters, location.speed);
-    }
+    const assignedGuardians: JobTrackingAssignment[] = [];
+    for (const assignment of job.assignments) {
+      const location = await this.guardianLocation.getCurrent(assignment.guardianId);
+      const guardianLat = parseCoordinate(location.latitude);
+      const guardianLng = parseCoordinate(location.longitude);
 
-    const user = assignment.guardian.user;
-    const displayName = user.fullName?.trim() || user.phoneNumber || null;
+      let distanceMeters: number | null = null;
+      let etaMinutes: number | null = null;
+      if (
+        guardianLat != null &&
+        guardianLng != null &&
+        siteLat != null &&
+        siteLng != null
+      ) {
+        distanceMeters = Math.round(
+          haversineDistanceMeters(guardianLat, guardianLng, siteLat, siteLng),
+        );
+        etaMinutes = estimateEtaMinutes(distanceMeters, location.speed);
+      }
 
-    return {
-      jobId: job.id,
-      jobStatus: job.status,
-      assignment: {
+      const user = assignment.guardian.user;
+      const displayName = user.fullName?.trim() || user.phoneNumber || null;
+      assignedGuardians.push({
         id: assignment.id,
         status: assignment.status,
         acceptedAt: assignment.acceptedAt?.toISOString() ?? null,
         arrivedAt: assignment.arrivedAt?.toISOString() ?? null,
+        guardian: {
+          id: assignment.guardianId,
+          displayName,
+        },
+        location,
+        distanceMeters,
+        etaMinutes,
+      });
+    }
+
+    const primary = assignedGuardians[0];
+
+    return {
+      jobId: job.id,
+      jobStatus: job.status,
+      staffing,
+      assignment: {
+        id: primary.id,
+        status: primary.status,
+        acceptedAt: primary.acceptedAt,
+        arrivedAt: primary.arrivedAt,
       },
-      guardian: {
-        id: assignment.guardianId,
-        displayName,
-      },
-      location,
+      guardian: primary.guardian,
+      location: primary.location,
       destination: {
         locationId: job.location.id,
         name: job.location.name,
@@ -309,8 +367,9 @@ export class JobsService {
         latitude: destLat,
         longitude: destLng,
       },
-      distanceMeters,
-      etaMinutes,
+      distanceMeters: primary.distanceMeters,
+      etaMinutes: primary.etaMinutes,
+      assignedGuardians,
     };
   }
 
@@ -328,6 +387,7 @@ export class JobsService {
     }
 
     await this.dispatching.releaseReplacementPipelineForJob(id);
+    await this.dispatching.releaseActiveStaffedAssignmentsForJob(id);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.job.update({
