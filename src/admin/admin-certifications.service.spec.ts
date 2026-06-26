@@ -34,6 +34,7 @@ describe('Admin certification reads', () => {
           { provide: PasswordService, useValue: {} },
           { provide: CredentialDeliveryService, useValue: {} },
           { provide: EmailNotificationService, useValue: {} },
+          { provide: NotificationsService, useValue: {} },
         ],
       }).compile();
       guardians = module.get(AdminGuardiansService);

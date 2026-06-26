@@ -275,12 +275,14 @@ async function main() {
       id: '00000000-0000-4000-8000-000000000100',
       priority: 1,
       pricingModel: PricingModel.HOURLY,
-      hourlyRate: 5000,
+      hourlyRate: null,
       jobType: null,
       organizationId: null,
       district: null,
     },
-    update: {},
+    update: {
+      hourlyRate: null,
+    },
   });
 
   await prisma.pricingRule.upsert({
@@ -290,11 +292,101 @@ async function main() {
       priority: 50,
       organizationId: org.id,
       district: loc1.district,
-      jobType: JobType.PATROL,
+      jobType: JobType.STANDARD_GUARDIAN,
       pricingModel: PricingModel.HOURLY,
       hourlyRate: 7500,
     },
-    update: {},
+    update: {
+      jobType: JobType.STANDARD_GUARDIAN,
+    },
+  });
+
+  const serviceCatalog = [
+    {
+      id: '00000000-0000-4000-8000-000000001001',
+      code: JobType.STANDARD_GUARDIAN,
+      name: 'Standard Guardian',
+      description: 'General-purpose on-site security and patrol coverage.',
+      hourlyRate: 5000,
+      requiresLicense: false,
+      sortOrder: 1,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001002',
+      code: JobType.CORPORATE_GUARDIAN,
+      name: 'Corporate Guardian',
+      description: 'Professional security for offices, compounds, and corporate sites.',
+      hourlyRate: 7500,
+      requiresLicense: false,
+      sortOrder: 2,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001003',
+      code: JobType.EVENT_GUARDIAN,
+      name: 'Event Guardian',
+      description: 'Crowd and perimeter security for events and gatherings.',
+      hourlyRate: 8000,
+      requiresLicense: false,
+      sortOrder: 3,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001004',
+      code: JobType.CHILD_ESCORT_GUARDIAN,
+      name: 'Child Escort Guardian',
+      description: 'Safe escort for children to and from school or activities.',
+      hourlyRate: 6000,
+      requiresLicense: false,
+      sortOrder: 4,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001005',
+      code: JobType.MEDICAL_ESCORT_GUARDIAN,
+      name: 'Medical Escort Guardian',
+      description: 'Escort and standby support for medical appointments and transfers.',
+      hourlyRate: 7000,
+      requiresLicense: false,
+      sortOrder: 5,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001006',
+      code: JobType.EXECUTIVE_VIP_GUARDIAN,
+      name: 'Executive / VIP Guardian',
+      description: 'Close protection and VIP escort services.',
+      hourlyRate: 12000,
+      requiresLicense: false,
+      sortOrder: 6,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000001007',
+      code: JobType.ARMED_GUARDIAN,
+      name: 'Armed Guardian',
+      description: 'Licensed armed security (RNP license required).',
+      hourlyRate: 15000,
+      requiresLicense: true,
+      sortOrder: 7,
+    },
+  ] as const;
+
+  for (const service of serviceCatalog) {
+    await prisma.service.upsert({
+      where: { code: service.code },
+      create: service,
+      update: {
+        name: service.name,
+        description: service.description,
+        requiresLicense: service.requiresLicense,
+        sortOrder: service.sortOrder,
+      },
+    });
+  }
+
+  await prisma.bookingSettings.upsert({
+    where: { id: '00000000-0000-4000-8000-000000000001' },
+    create: {
+      id: '00000000-0000-4000-8000-000000000001',
+      minimumBookingHours: 2,
+    },
+    update: { minimumBookingHours: 2 },
   });
 
   console.log('Seed complete:', {

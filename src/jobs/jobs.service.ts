@@ -42,6 +42,8 @@ import {
 } from './job-tracking.types';
 import { JobStaffingPresenterService } from './job-staffing-presenter.service';
 import { STAFFED_ASSIGNMENT_STATUSES } from './job-staffing.util';
+import { ServicesService } from '../services/services.service';
+import { BookingSettingsService } from '../services/booking-settings.service';
 
 const jobWithLocationAndOrganization = {
   location: true,
@@ -65,12 +67,27 @@ export class JobsService {
     private readonly billingCalculation: BillingCalculationService,
     private readonly invoiceView: InvoiceViewService,
     private readonly staffingPresenter: JobStaffingPresenterService,
+    private readonly servicesCatalog: ServicesService,
+    private readonly bookingSettings: BookingSettingsService,
   ) {}
 
   async create(dto: CreateJobDto, actor: AuthUserPayload, autoDispatch = true) {
     await this.policy.assertOrgMember(dto.organizationId, actor);
     if (!this.policy.isOps(actor)) {
       await this.locationSetup.assertCanBookJobs(dto.organizationId);
+    }
+
+    await this.servicesCatalog.getByCode(dto.jobType);
+
+    const scheduledStart = new Date(dto.scheduledStart);
+    const scheduledEnd = new Date(dto.scheduledEnd);
+    const bookingPolicy = await this.bookingSettings.getPolicy();
+    const durationHours =
+      (scheduledEnd.getTime() - scheduledStart.getTime()) / (1000 * 60 * 60);
+    if (durationHours < bookingPolicy.minimumBookingHours) {
+      throw new BadRequestException(
+        `Minimum booking is ${bookingPolicy.minimumBookingHours} hour(s)`,
+      );
     }
 
     const location = await this.prisma.location.findFirst({
@@ -84,7 +101,6 @@ export class JobsService {
     }
 
     const referenceNumber = await this.references.nextReference();
-    const scheduledStart = new Date(dto.scheduledStart);
     const billingPolicy = await this.billingCalculation.resolveBillingPolicy(
       dto.organizationId,
       dto.jobType,
@@ -101,7 +117,7 @@ export class JobsService {
           jobType: dto.jobType,
           priority: dto.priority,
           scheduledStart,
-          scheduledEnd: new Date(dto.scheduledEnd),
+          scheduledEnd,
           notes: dto.notes,
           specialInstructions: dto.specialInstructions,
           requestedGuardianCount: dto.requestedGuardianCount ?? 1,

@@ -15,6 +15,9 @@ import { BillingCalculationService } from '../billing/billing-calculation.servic
 import { GuardianLocationService } from '../guardians/guardian-location.service';
 import { JobReferenceService } from './job-reference.service';
 import { InvoiceViewService } from '../billing/invoice-view.service';
+import { ServicesService } from '../services/services.service';
+import { BookingSettingsService } from '../services/booking-settings.service';
+import { JobStaffingPresenterService } from './job-staffing-presenter.service';
 import { JobsService } from './jobs.service';
 
 describe('JobsService', () => {
@@ -76,6 +79,31 @@ describe('JobsService', () => {
           provide: InvoiceViewService,
           useValue: { applyPendingConfirmationOnView: jest.fn((inv) => inv) },
         },
+        {
+          provide: ServicesService,
+          useValue: {
+            getByCode: jest.fn().mockResolvedValue({
+              code: 'STANDARD_GUARDIAN',
+              requiresLicense: false,
+            }),
+          },
+        },
+        {
+          provide: BookingSettingsService,
+          useValue: {
+            getPolicy: jest.fn().mockResolvedValue({ minimumBookingHours: 2 }),
+          },
+        },
+        {
+          provide: JobStaffingPresenterService,
+          useValue: {
+            buildStaffingProgress: jest.fn().mockResolvedValue({
+              requested: 1,
+              staffed: 0,
+              remaining: 1,
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -104,7 +132,7 @@ describe('JobsService', () => {
         {
           organizationId: 'org-1',
           locationId: 'loc-1',
-          jobType: 'PATROL',
+          jobType: 'STANDARD_GUARDIAN',
           scheduledStart: '2025-06-01T10:00:00Z',
           scheduledEnd: '2025-06-01T18:00:00Z',
         },
@@ -138,7 +166,7 @@ describe('JobsService', () => {
 
   it('findOne includes location and organization', async () => {
     policy.assertJobAccess.mockResolvedValue({ id: 'job-1' });
-    prisma.job.findUnique.mockResolvedValue({ id: 'job-1' });
+    prisma.job.findUnique.mockResolvedValue({ id: 'job-1', assignments: [] });
 
     const actor = {
       sub: 'u1',

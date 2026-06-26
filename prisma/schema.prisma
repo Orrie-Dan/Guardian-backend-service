@@ -402,14 +402,13 @@ enum PreferredShift {
 }
 
 enum GuardianSpecialization {
-  PATROL
-  ESCORT
-  EVENT_SECURITY
-  DOOR_SUPERVISION
-  VIP_PROTECTION
-  EMERGENCY_RESPONSE
-  COMPOUND_SECURITY
-  STATIC_POST
+  STANDARD_GUARDIAN
+  CORPORATE_GUARDIAN
+  EVENT_GUARDIAN
+  CHILD_ESCORT_GUARDIAN
+  MEDICAL_ESCORT_GUARDIAN
+  EXECUTIVE_VIP_GUARDIAN
+  ARMED_GUARDIAN
 
   @@schema("guardian")
 }
@@ -538,14 +537,13 @@ model District {
 // --- job ---
 
 enum JobType {
-  PATROL
-  ESCORT
-  EVENT_SECURITY
-  DOOR_SUPERVISION
-  VIP_PROTECTION
-  EMERGENCY_RESPONSE
-  COMPOUND_SECURITY
-  STATIC_POST
+  STANDARD_GUARDIAN
+  CORPORATE_GUARDIAN
+  EVENT_GUARDIAN
+  CHILD_ESCORT_GUARDIAN
+  MEDICAL_ESCORT_GUARDIAN
+  EXECUTIVE_VIP_GUARDIAN
+  ARMED_GUARDIAN
 
   @@schema("job")
 }
@@ -917,6 +915,41 @@ model PayPolicy {
 
   @@index([priority(sort: Desc)])
   @@map("pay_policies")
+  @@schema("billing")
+}
+
+model Service {
+  id              String   @id @default(uuid()) @db.Uuid
+  code            JobType  @unique
+  name            String   @db.VarChar(120)
+  description     String?
+  hourlyRate      Decimal  @map("hourly_rate") @db.Decimal(10, 2)
+  currency        String   @default("RWF") @db.Char(3)
+  isActive        Boolean  @default(true) @map("is_active")
+  requiresLicense Boolean  @default(false) @map("requires_license")
+  sortOrder       Int      @default(0) @map("sort_order") @db.SmallInt
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("services")
+  @@schema("billing")
+}
+
+model BookingSettings {
+  id                    String   @id @default("00000000-0000-4000-8000-000000000001") @db.Uuid
+  minimumBookingHours   Decimal  @default(2) @map("minimum_booking_hours") @db.Decimal(6, 2)
+  nightSurchargeMinPct  Decimal  @default(0.10) @map("night_surcharge_min_pct") @db.Decimal(5, 4)
+  nightSurchargeMaxPct  Decimal  @default(0.20) @map("night_surcharge_max_pct") @db.Decimal(5, 4)
+  holidaySurchargeMinPct Decimal @default(0.20) @map("holiday_surcharge_min_pct") @db.Decimal(5, 4)
+  holidaySurchargeMaxPct Decimal @default(0.30) @map("holiday_surcharge_max_pct") @db.Decimal(5, 4)
+  guardianSharePct      Decimal  @default(0.80) @map("guardian_share_pct") @db.Decimal(5, 4)
+  platformSharePct      Decimal  @default(0.15) @map("platform_share_pct") @db.Decimal(5, 4)
+  gatewaySharePct       Decimal  @default(0.03) @map("gateway_share_pct") @db.Decimal(5, 4)
+  reserveSharePct       Decimal  @default(0.02) @map("reserve_share_pct") @db.Decimal(5, 4)
+  vatRate               Decimal  @default(0.18) @map("vat_rate") @db.Decimal(5, 4)
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("booking_settings")
   @@schema("billing")
 }
 

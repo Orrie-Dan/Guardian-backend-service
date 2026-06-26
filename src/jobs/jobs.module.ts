@@ -5,6 +5,7 @@ import { GuardianReviewsModule } from '../guardian-reviews/guardian-reviews.modu
 import { GuardiansModule } from '../guardians/guardians.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OutboxModule } from '../outbox/outbox.module';
+import { ServicesModule } from '../services/services.module';
 import { JobLifecycleService } from './job-lifecycle.service';
 import { JobReferenceService } from './job-reference.service';
 import { JobStaffingPresenterService } from './job-staffing-presenter.service';
@@ -16,6 +17,7 @@ import { JobsService } from './jobs.service';
 @Module({
   imports: [
     BillingCoreModule,
+    ServicesModule,
     GuardianReviewsModule,
     GuardiansModule,
     NotificationsModule,

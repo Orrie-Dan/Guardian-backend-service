@@ -26,7 +26,7 @@ describe('GuardianPayPolicyService', () => {
     prisma.payPolicy.findMany.mockResolvedValue([
       {
         priority: 100,
-        jobType: JobType.PATROL,
+        jobType: JobType.STANDARD_GUARDIAN,
         employmentType: null,
         model: PayPolicyModel.ACTUAL_TIME,
         minimumHours: new Prisma.Decimal(0),
@@ -43,7 +43,7 @@ describe('GuardianPayPolicyService', () => {
     ]);
 
     const result = await service.resolvePayPolicy(
-      JobType.PATROL,
+      JobType.STANDARD_GUARDIAN,
       EmploymentType.PART_TIME,
       new Date('2026-06-01T08:00:00.000Z'),
     );

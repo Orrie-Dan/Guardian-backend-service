@@ -16,6 +16,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BillingCalculationService } from './billing-calculation.service';
 import { InvoiceViewService } from './invoice-view.service';
 import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
+import { ServicesService } from '../services/services.service';
+import { BookingSettingsService } from '../services/booking-settings.service';
 import { BillingService } from './billing.service';
 
 describe('BillingService', () => {
@@ -63,6 +65,27 @@ describe('BillingService', () => {
     cancelEarningsForInvoice: jest.fn(),
     accrueForPaidInvoice: jest.fn(),
   };
+  const servicesCatalog = {
+    getHourlyRateForJobType: jest.fn().mockResolvedValue({
+      hourlyRate: new Prisma.Decimal(5000),
+      currency: 'RWF',
+      serviceName: 'Standard Guardian',
+    }),
+  };
+  const bookingSettings = {
+    getPolicy: jest.fn().mockResolvedValue({
+      minimumBookingHours: 2,
+      nightSurchargeMinPct: 0.1,
+      nightSurchargeMaxPct: 0.2,
+      holidaySurchargeMinPct: 0.2,
+      holidaySurchargeMaxPct: 0.3,
+      guardianSharePct: 0.8,
+      platformSharePct: 0.15,
+      gatewaySharePct: 0.03,
+      reserveSharePct: 0.02,
+      vatRate: 0.18,
+    }),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -77,6 +100,8 @@ describe('BillingService', () => {
         { provide: BillingCalculationService, useValue: calculation },
         { provide: InvoiceViewService, useValue: invoiceView },
         { provide: GuardianPayrollService, useValue: guardianPayroll },
+        { provide: ServicesService, useValue: servicesCatalog },
+        { provide: BookingSettingsService, useValue: bookingSettings },
       ],
     }).compile();
 
@@ -90,7 +115,7 @@ describe('BillingService', () => {
         id: 'job-1',
         organizationId: 'org-1',
         referenceNumber: 'JOB-001',
-        jobType: 'PATROL',
+        jobType: 'STANDARD_GUARDIAN',
         scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
         scheduledEnd: new Date('2026-06-01T16:00:00.000Z'),
         requestedGuardianCount: 1,

@@ -114,7 +114,7 @@ describe('AssignmentsService', () => {
       job: {
         id: 'job-1',
         status: JobStatus.DISPATCHING,
-        jobType: 'PATROL',
+        jobType: 'STANDARD_GUARDIAN',
         scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
         requestedGuardianCount: 1,
       },
@@ -169,7 +169,7 @@ describe('AssignmentsService', () => {
       job: {
         id: 'job-1',
         status: JobStatus.DISPATCHING,
-        jobType: 'PATROL',
+        jobType: 'STANDARD_GUARDIAN',
         scheduledStart: new Date('2026-06-01T08:00:00.000Z'),
         requestedGuardianCount: 3,
       },

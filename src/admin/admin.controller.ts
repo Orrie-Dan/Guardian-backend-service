@@ -60,6 +60,10 @@ import { GuardianLocationService } from '../guardians/guardian-location.service'
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentsService } from '../documents/documents.service';
 import { DispatchingService } from '../dispatching/dispatching.service';
+import { CreateServiceDto } from '../services/dto/create-service.dto';
+import { UpdateBookingSettingsDto } from '../services/dto/update-booking-settings.dto';
+import { UpdateServiceDto } from '../services/dto/update-service.dto';
+import { AdminServicesService } from './admin-services.service';
 import { AdminReplacementService } from './admin-replacement.service';
 import { ReplacementDenyDto } from '../assignments/dto/replacement.dto';
 import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
@@ -91,6 +95,7 @@ export class AdminController {
     private readonly dispatching: DispatchingService,
     private readonly replacement: AdminReplacementService,
     private readonly guardianPayroll: GuardianPayrollService,
+    private readonly adminServices: AdminServicesService,
   ) {}
 
   @Get('assignments/replacement-requests')
@@ -412,6 +417,55 @@ export class AdminController {
     @CurrentUser() user: AuthUserPayload,
   ) {
     return this.pricing.update(id, body, user.sub);
+  }
+
+  @Get('services')
+  @RequirePermissions('admin:services:read')
+  listServices() {
+    return this.adminServices.listServices();
+  }
+
+  @Post('services')
+  @RequirePermissions('admin:services:write')
+  createService(
+    @Body() body: CreateServiceDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.adminServices.createService(body, user.sub);
+  }
+
+  @Patch('services/:id')
+  @RequirePermissions('admin:services:write')
+  updateService(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateServiceDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.adminServices.updateService(id, body, user.sub);
+  }
+
+  @Delete('services/:id')
+  @RequirePermissions('admin:services:write')
+  deleteService(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.adminServices.deleteService(id, user.sub);
+  }
+
+  @Get('booking-settings')
+  @RequirePermissions('admin:services:read')
+  getBookingSettings() {
+    return this.adminServices.getBookingSettings();
+  }
+
+  @Patch('booking-settings')
+  @RequirePermissions('admin:services:write')
+  updateBookingSettings(
+    @Body() body: UpdateBookingSettingsDto,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    return this.adminServices.updateBookingSettings(body, user.sub);
   }
 
   @Get('billing-policies')

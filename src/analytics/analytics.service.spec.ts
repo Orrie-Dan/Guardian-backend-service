@@ -111,7 +111,7 @@ describe('AnalyticsService', () => {
     prisma.job.findMany.mockResolvedValue([
       {
         createdAt: new Date('2026-06-01T10:00:00.000Z'),
-        jobType: 'PATROL',
+        jobType: 'STANDARD_GUARDIAN',
         status: JobStatus.COMPLETED,
         assignments: [
           {

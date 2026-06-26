@@ -13,6 +13,11 @@ import {
   effectiveBillingModelForInvoice,
   isEarlyReleaseApproved,
 } from '../assignments/early-release.util';
+import {
+  BookingPolicySnapshot,
+  computeRevenueSplit,
+  computeSurchargeMultiplier,
+} from '../common/config/booking-policy.config';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type BillableDurationResult = {
@@ -50,6 +55,10 @@ export type InvoiceAmountsInput = {
   hourlyRate: Prisma.Decimal | null;
   replacementHandoff?: boolean;
   flatFee: Prisma.Decimal | null;
+  bookingPolicy?: BookingPolicySnapshot;
+  serviceName?: string;
+  surchargeReasons?: string[];
+  surchargeMultiplier?: Prisma.Decimal;
 };
 
 export type InvoiceAmountsResult = BillableDurationResult & {
@@ -147,6 +156,10 @@ export class BillingCalculationService {
       hourlyRate,
       flatFee,
       replacementHandoff,
+      bookingPolicy,
+      serviceName,
+      surchargeReasons = [],
+      surchargeMultiplier = new Prisma.Decimal(1),
     } = input;
 
     if (!assignment.arrivedAt || !assignment.completedAt) {
@@ -226,14 +239,60 @@ export class BillingCalculationService {
     ];
 
     if (pricingModel === PricingModel.HOURLY && hourlyRate) {
-      subtotal = hourlyRate.mul(duration.billableHours).mul(guardians);
+      const effectiveRate = hourlyRate.mul(surchargeMultiplier);
+      const grossService = effectiveRate
+        .mul(duration.billableHours)
+        .mul(guardians);
+      subtotal = grossService;
+
       lineItems.push({
         code: 'service',
-        label: 'Guardian service (hourly)',
+        label: serviceName
+          ? `${serviceName} (hourly)`
+          : 'Guardian service (hourly)',
         quantity: `${duration.billableHours.toFixed(2)} hrs × ${guardians} guardian(s)`,
-        unitPrice: hourlyRate.toString(),
-        amount: subtotal.toString(),
+        unitPrice: effectiveRate.toString(),
+        amount: grossService.toString(),
       });
+
+      if (surchargeReasons.length > 0) {
+        lineItems.push({
+          code: 'surcharge',
+          label: 'Schedule surcharges',
+          quantity: surchargeReasons.join(', '),
+          unitPrice: surchargeMultiplier.toString(),
+        });
+      }
+
+      if (bookingPolicy) {
+        const split = computeRevenueSplit(grossService, bookingPolicy);
+        const gPct = Math.round(bookingPolicy.guardianSharePct * 100);
+        const pPct = Math.round(bookingPolicy.platformSharePct * 100);
+        const gwPct = Math.round(bookingPolicy.gatewaySharePct * 100);
+        const rPct = Math.round(bookingPolicy.reserveSharePct * 100);
+        lineItems.push(
+          {
+            code: 'split_guardian',
+            label: `Guardian share (${gPct}%)`,
+            amount: split.guardian.toString(),
+          },
+          {
+            code: 'split_platform',
+            label: `Platform share (${pPct}%)`,
+            amount: split.platform.toString(),
+          },
+          {
+            code: 'split_gateway',
+            label: `Payment gateway (${gwPct}%)`,
+            amount: split.gateway.toString(),
+          },
+          {
+            code: 'split_reserve',
+            label: `Operational reserve (${rPct}%)`,
+            amount: split.reserve.toString(),
+          },
+        );
+      }
     } else if (pricingModel === PricingModel.FLAT && flatFee) {
       subtotal = flatFee.mul(guardians);
       lineItems.push({

@@ -6,6 +6,7 @@ import { DispatchingModule } from '../dispatching/dispatching.module';
 import { GuardianPayrollModule } from '../guardian-payroll/guardian-payroll.module';
 import { GuardiansModule } from '../guardians/guardians.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ServicesModule } from '../services/services.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminAuditService } from './admin-audit.service';
@@ -18,11 +19,13 @@ import { AdminPayPoliciesService } from './admin-pay-policies.service';
 import { AdminPricingService } from './admin-pricing.service';
 import { AdminVerificationService } from './admin-verification.service';
 import { AdminReplacementService } from './admin-replacement.service';
+import { AdminServicesService } from './admin-services.service';
 import { AssignmentsModule } from '../assignments/assignments.module';
 
 @Module({
   imports: [
     BillingModule,
+    ServicesModule,
     AuthModule,
     DocumentsModule,
     GuardianPayrollModule,
@@ -44,6 +47,7 @@ import { AssignmentsModule } from '../assignments/assignments.module';
     AdminAuditService,
     AdminAnalyticsService,
     AdminReplacementService,
+    AdminServicesService,
   ],
 })
 export class AdminModule {}

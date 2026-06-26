@@ -73,7 +73,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+        job: { scheduledStart, scheduledEnd, jobType: 'STANDARD_GUARDIAN' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -117,7 +117,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+        job: { scheduledStart, scheduledEnd, jobType: 'STANDARD_GUARDIAN' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -161,7 +161,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+        job: { scheduledStart, scheduledEnd, jobType: 'STANDARD_GUARDIAN' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -202,7 +202,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+        job: { scheduledStart, scheduledEnd, jobType: 'STANDARD_GUARDIAN' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {
@@ -267,7 +267,7 @@ describe('GuardianPayrollService', () => {
         jobId: 'job-1',
         status: InvoiceStatus.PAID,
         currency: 'RWF',
-        job: { scheduledStart, scheduledEnd, jobType: 'PATROL' },
+        job: { scheduledStart, scheduledEnd, jobType: 'STANDARD_GUARDIAN' },
       });
       prisma.jobAssignment.findMany.mockResolvedValue([
         {

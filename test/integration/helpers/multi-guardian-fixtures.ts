@@ -82,7 +82,7 @@ export async function createMultiGuardianJobFixture(
       organizationId,
       locationId,
       createdBy: creatorId,
-      jobType: JobType.PATROL,
+      jobType: JobType.STANDARD_GUARDIAN,
       priority: JobPriority.STANDARD,
       status: JobStatus.DISPATCHING,
       requestedGuardianCount: options.requestedGuardianCount,

@@ -2,12 +2,15 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ClientInvoiceDetailDto } from '../billing/dto/invoice-detail.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -24,6 +27,8 @@ import { JobsService } from './jobs.service';
 @ApiBearerAuth()
 @Controller('jobs')
 export class JobsController {
+  private readonly logger = new Logger(JobsController.name);
+
   constructor(
     private readonly jobs: JobsService,
     private readonly guardianReviews: GuardianReviewsService,
@@ -31,8 +36,32 @@ export class JobsController {
 
   @Post()
   @RequirePermissions('jobs:create')
-  create(@Body() dto: CreateJobDto, @CurrentUser() user: AuthUserPayload) {
-    return this.jobs.create(dto, user);
+  async create(
+    @Body() dto: CreateJobDto,
+    @Req() req: Request,
+    @CurrentUser() user: AuthUserPayload,
+  ) {
+    this.logger.log(
+      JSON.stringify({
+        event: 'POST /jobs audit',
+        rawBody: req.body,
+        dtoRequestedGuardianCount: dto.requestedGuardianCount ?? null,
+        actorUserId: user.sub,
+      }),
+    );
+
+    const job = await this.jobs.create(dto, user);
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'POST /jobs persisted',
+        jobId: job.id,
+        referenceNumber: job.referenceNumber,
+        requestedGuardianCount: job.requestedGuardianCount,
+      }),
+    );
+
+    return job;
   }
 
   @Get()

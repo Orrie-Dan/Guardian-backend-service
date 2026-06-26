@@ -24,6 +24,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { RegionsModule } from './regions/regions.module';
+import { ServicesModule } from './services/services.module';
 import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 
@@ -50,6 +51,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AdminModule,
     AnalyticsModule,
     RegionsModule,
+    ServicesModule,
     WebhooksModule,
   ],
   controllers: [AppController],

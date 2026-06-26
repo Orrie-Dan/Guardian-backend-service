@@ -213,7 +213,7 @@ describe('BillingCalculationService', () => {
 
       const result = await service.resolveBillingPolicy(
         'org-1',
-        'PATROL' as never,
+        'STANDARD_GUARDIAN' as never,
         new Date('2026-06-01T10:00:00.000Z'),
       );
 

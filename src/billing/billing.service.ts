@@ -10,6 +10,7 @@ import {
   JobType,
   Location,
   Prisma,
+  PricingModel,
 } from '@prisma/client';
 import { AuditService } from '../common/services/audit.service';
 import {
@@ -46,6 +47,9 @@ import {
 } from './invoice-detail.presenter';
 import { InvoiceViewService } from './invoice-view.service';
 import { GuardianPayrollService } from '../guardian-payroll/guardian-payroll.service';
+import { ServicesService } from '../services/services.service';
+import { BookingSettingsService } from '../services/booking-settings.service';
+import { computeSurchargeMultiplier } from '../common/config/booking-policy.config';
 
 type JobWithLocation = Job & { location: Location };
 
@@ -61,6 +65,8 @@ export class BillingService {
     private readonly outbox: OutboxService,
     private readonly invoiceView: InvoiceViewService,
     private readonly guardianPayroll: GuardianPayrollService,
+    private readonly services: ServicesService,
+    private readonly bookingSettings: BookingSettingsService,
   ) {}
 
   async resolvePrice(
@@ -69,6 +75,8 @@ export class BillingService {
     jobType: JobType,
     scheduledStart: Date,
   ) {
+    const catalog = await this.services.getHourlyRateForJobType(jobType);
+
     const rules = await this.prisma.pricingRule.findMany({
       where: {
         AND: [
@@ -81,7 +89,7 @@ export class BillingService {
       orderBy: { priority: 'desc' },
     });
 
-    const match = rules.find((rule) => {
+    const override = rules.find((rule) => {
       if (rule.organizationId && rule.organizationId !== organizationId) {
         return false;
       }
@@ -91,14 +99,21 @@ export class BillingService {
       if (rule.jobType && rule.jobType !== jobType) {
         return false;
       }
-      return true;
+      return rule.hourlyRate != null || rule.flatFee != null;
     });
 
-    if (!match) {
-      throw new NotFoundException('No pricing rule matched');
-    }
+    const hourlyRate = override?.hourlyRate ?? catalog.hourlyRate;
+    const pricingModel =
+      override?.pricingModel ?? PricingModel.HOURLY;
+    const currency = override?.currency ?? catalog.currency;
 
-    return match;
+    return {
+      pricingModel,
+      hourlyRate,
+      flatFee: override?.flatFee ?? null,
+      currency,
+      serviceName: catalog.serviceName,
+    };
   }
 
   async createDraftInvoiceForJobId(jobId: string, actorUserId: string) {
@@ -145,6 +160,14 @@ export class BillingService {
       job.scheduledStart,
     );
 
+    const bookingPolicy = await this.bookingSettings.getPolicy();
+    const { multiplier: surchargeMultiplier, reasons: surchargeReasons } =
+      computeSurchargeMultiplier(
+        job.scheduledStart,
+        job.scheduledEnd,
+        bookingPolicy,
+      );
+
     const billingPolicy = await this.calculation.resolveBillingPolicy(
       job.organizationId,
       job.jobType,
@@ -163,9 +186,13 @@ export class BillingService {
       hourlyRate: rule.hourlyRate,
       flatFee: rule.flatFee,
       replacementHandoff,
+      bookingPolicy,
+      serviceName: rule.serviceName,
+      surchargeMultiplier,
+      surchargeReasons,
     });
 
-    const taxAmount = amounts.subtotal.mul(0.18);
+    const taxAmount = amounts.subtotal.mul(bookingPolicy.vatRate);
     const total = amounts.subtotal.add(taxAmount);
 
     const invoice = await this.prisma.invoice.create({
